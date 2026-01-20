@@ -23,23 +23,30 @@ export interface MinimapData {
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
 }
 
-// 8-bit color palette
+// F1 Professional Racing color palette
 const PIXEL_COLORS = {
-  black: 0x0f0f23,
-  dark: 0x1a1a2e,
-  mid: 0x2d2d44,
-  light: 0x4a4a6a,
-  red: 0xff004d,
-  orange: 0xffa300,
-  yellow: 0xffec27,
-  green: 0x00e436,
-  cyan: 0x29adff,
-  blue: 0x1d2b53,
-  purple: 0x7e2553,
-  pink: 0xff77a8,
-  white: 0xfff1e8,
-  gray: 0x5f574f,
+  black: 0x171717,    // Carbon black
+  dark: 0x262626,     // Charcoal - panels
+  mid: 0x404040,      // Slate - track surface
+  light: 0x737373,    // Inactive UI
+  red: 0xdc2626,      // Racing red - barriers
+  orange: 0xea580c,   // McLaren orange
+  yellow: 0xfbbf24,   // Caution yellow
+  green: 0x1f2937,    // Dark blue-gray - ground
+  cyan: 0x525252,     // Neutral
+  blue: 0x2563eb,     // Williams blue
+  purple: 0x525252,   // Neutral
+  pink: 0xdc2626,     // Same as red
+  white: 0xffffff,    // Pure white - barriers
+  gray: 0xa3a3a3,     // Chrome silver
+  asphalt: 0x333333,  // Track asphalt primary
+  asphaltAlt: 0x404040, // Track asphalt alternate
 };
+
+export interface TrackBuilderOptions {
+  customWaypoints?: TrackWaypoint[];
+  customStartPosition?: { x: number; z: number; rotation: number };
+}
 
 export class TrackBuilder {
   private scene: THREE.Scene;
@@ -47,17 +54,70 @@ export class TrackBuilder {
   private trackData: TrackData;
   private barrierBodies: CANNON.Body[] = [];
   private barrierMaterial: CANNON.Material;
+  private options: TrackBuilderOptions;
 
   // Curve-based track generation
   private trackCurve: THREE.CatmullRomCurve3 | null = null;
   private curvePoints: THREE.Vector3[] = [];
   private readonly CURVE_SEGMENTS = 200; // Points along the curve
 
-  constructor(scene: THREE.Scene, world: CANNON.World) {
+  constructor(scene: THREE.Scene, world: CANNON.World, options?: TrackBuilderOptions) {
     this.scene = scene;
     this.world = world;
+    this.options = options || {};
     this.barrierMaterial = new CANNON.Material('barrier');
-    this.trackData = this.generateTrackData();
+
+    // Use custom waypoints if provided, otherwise generate default track
+    if (this.options.customWaypoints && this.options.customWaypoints.length > 0) {
+      this.trackData = this.createTrackFromWaypoints(
+        this.options.customWaypoints,
+        this.options.customStartPosition
+      );
+    } else {
+      this.trackData = this.generateTrackData();
+    }
+  }
+
+  private createTrackFromWaypoints(
+    waypoints: TrackWaypoint[],
+    startPosition?: { x: number; z: number; rotation: number }
+  ): TrackData {
+    // Generate curve for barrier positions
+    const points = waypoints.map(wp => new THREE.Vector3(wp.x, 0, wp.z));
+    const tempCurve = new THREE.CatmullRomCurve3(points, true, 'catmullrom', 0.5);
+
+    // Generate barriers along the smooth curve
+    const { innerBarriers, outerBarriers } = this.generateBarrierPositions(waypoints, tempCurve);
+
+    // Calculate start position if not provided
+    const calculatedStart = startPosition || this.calculateStartFromWaypoints(waypoints, tempCurve);
+
+    return {
+      waypoints,
+      startPosition: calculatedStart,
+      innerBarriers,
+      outerBarriers,
+    };
+  }
+
+  private calculateStartFromWaypoints(
+    waypoints: TrackWaypoint[],
+    curve: THREE.CatmullRomCurve3
+  ): { x: number; z: number; rotation: number } {
+    // Find first checkpoint or use first waypoint
+    const startIndex = waypoints.findIndex(wp => wp.isCheckpoint);
+    const idx = startIndex >= 0 ? startIndex : 0;
+
+    const t = idx / waypoints.length;
+    const point = curve.getPoint(t);
+    const tangent = curve.getTangent(t);
+    const rotation = Math.atan2(tangent.x, tangent.z);
+
+    return {
+      x: point.x,
+      z: point.z,
+      rotation
+    };
   }
 
   private generateTrackCurve(): void {
@@ -67,61 +127,45 @@ export class TrackBuilder {
   }
 
   private getWidthAtT(t: number): number {
-    const waypoints = this.trackData.waypoints;
-    const numWaypoints = waypoints.length;
-
-    // Find which waypoint segment we're in
-    const segmentFloat = t * numWaypoints;
-    const segmentIndex = Math.floor(segmentFloat) % numWaypoints;
-    const segmentT = segmentFloat - Math.floor(segmentFloat);
-
-    const currentWidth = waypoints[segmentIndex].width;
-    const nextWidth = waypoints[(segmentIndex + 1) % numWaypoints].width;
-
-    // Smooth interpolation between widths
-    return currentWidth + (nextWidth - currentWidth) * segmentT;
+    // Use the same smooth interpolation as barriers for alignment
+    return this.getWidthAtCurveT(t, this.trackData.waypoints);
   }
 
   private generateTrackData(): TrackData {
-    // Fun racing circuit with variety - designed for good flow
+    // Challenging F1-style circuit with technical sections
+    // Requires proper braking and racing line discipline
     const waypoints: TrackWaypoint[] = [
-      // Start/finish straight (heading +Z)
-      { x: 0, z: 0, width: 18, speedLimit: 180, isCheckpoint: true },
-      { x: 0, z: 40, width: 18, speedLimit: 180 },
-      { x: 0, z: 80, width: 16, speedLimit: 160 },
+      // === START/FINISH STRAIGHT (x=0, heading north) ===
+      { x: 0, z: 0, width: 16, speedLimit: 180, isCheckpoint: true },
+      { x: 0, z: 40, width: 16, speedLimit: 180 },
+      { x: 0, z: 80, width: 14, speedLimit: 120 },  // Braking zone
 
-      // Turn 1-2: Fast right-left complex
-      { x: 20, z: 110, width: 15, speedLimit: 120 },
-      { x: 50, z: 125, width: 14, speedLimit: 100, isCheckpoint: true },
-      { x: 80, z: 120, width: 15, speedLimit: 110 },
+      // === TURN 1: Tight chicane complex (x=20-120, z=95-120) ===
+      { x: 25, z: 100, width: 13, speedLimit: 90 },
+      { x: 55, z: 115, width: 12, speedLimit: 70, isCheckpoint: true },
+      { x: 72, z: 105, width: 10, speedLimit: 55 },   // Tight chicane left (narrowed)
+      { x: 88, z: 118, width: 10, speedLimit: 55 },   // Tight chicane right (narrowed)
+      { x: 110, z: 108, width: 11, speedLimit: 65 },  // Exit - still technical
+      { x: 125, z: 95, width: 13, speedLimit: 100 },  // Opening up
 
-      // Back straight with slight kink
-      { x: 110, z: 100, width: 16, speedLimit: 150 },
-      { x: 140, z: 85, width: 16, speedLimit: 160 },
-      { x: 165, z: 65, width: 16, speedLimit: 150 },
+      // === BACK STRAIGHT with aggressive S-curves (x=135-160, z=-10 to 85) ===
+      { x: 145, z: 75, width: 14, speedLimit: 130 },
+      { x: 160, z: 50, width: 13, speedLimit: 100 },
+      { x: 148, z: 30, width: 11, speedLimit: 70 },   // Esses - tight left
+      { x: 162, z: 10, width: 11, speedLimit: 70 },   // Esses - tight right
+      { x: 150, z: -10, width: 12, speedLimit: 85, isCheckpoint: true },
 
-      // Hairpin: Heavy braking zone
-      { x: 180, z: 40, width: 13, speedLimit: 70 },
-      { x: 185, z: 15, width: 12, speedLimit: 50, isCheckpoint: true },
-      { x: 175, z: -5, width: 12, speedLimit: 50 },
-      { x: 155, z: -15, width: 13, speedLimit: 70 },
+      // === TURN 2: Technical hairpin (x=20-130, z=-60 to -25) ===
+      { x: 125, z: -30, width: 12, speedLimit: 55 },  // Entry braking
+      { x: 100, z: -48, width: 11, speedLimit: 45 },  // Approaching apex
+      { x: 70, z: -58, width: 10, speedLimit: 38 },   // Tight hairpin apex
+      { x: 40, z: -55, width: 10, speedLimit: 40, isCheckpoint: true },  // Mid hairpin
+      { x: 20, z: -42, width: 11, speedLimit: 55 },   // Exit phase
 
-      // Technical esses section
-      { x: 125, z: -25, width: 13, speedLimit: 80 },
-      { x: 95, z: -15, width: 13, speedLimit: 85 },
-      { x: 65, z: -30, width: 13, speedLimit: 80, isCheckpoint: true },
-      { x: 35, z: -20, width: 13, speedLimit: 85 },
-
-      // Sweeping left turn
-      { x: 10, z: -35, width: 15, speedLimit: 100 },
-      { x: -15, z: -45, width: 15, speedLimit: 110 },
-      { x: -35, z: -40, width: 15, speedLimit: 120 },
-
-      // Final chicane before finish
-      { x: -45, z: -20, width: 14, speedLimit: 90 },
-      { x: -40, z: 0, width: 14, speedLimit: 95 },
-      { x: -25, z: 15, width: 15, speedLimit: 100 },
-      { x: -10, z: 5, width: 16, speedLimit: 120 },
+      // === FINAL APPROACH (x=5-15, z=-30 to -10) ===
+      { x: 8, z: -25, width: 13, speedLimit: 90 },
+      { x: 5, z: -12, width: 14, speedLimit: 120 },   // Accelerating to finish
+      // CatmullRom closes back to (0, 0)
     ];
 
     // Generate curve first for barrier positions
@@ -152,7 +196,7 @@ export class TrackBuilder {
 
     // Calculate total curve length
     const numSamples = this.CURVE_SEGMENTS;
-    const barrierOffset = 1.5; // Distance from track edge to barrier center
+    const barrierOffset = 2.5; // Distance from track edge to barrier center (accounts for barrier half-width of 2)
 
     for (let i = 0; i < numSamples; i++) {
       const t = i / numSamples;
@@ -205,7 +249,8 @@ export class TrackBuilder {
     side: number // 1 for inner, -1 for outer
   ): { x: number; z: number; rotation: number }[] {
     const result: { x: number; z: number; rotation: number }[] = [];
-    const barrierOffset = 1.5;
+    const barrierOffset = 2.5; // Distance from track edge to barrier center (accounts for barrier half-width of 2)
+    const minBarrierDistance = 3.5; // Minimum distance between adjacent barriers
 
     for (let i = 0; i < targetCount; i++) {
       const t = i / targetCount;
@@ -220,11 +265,17 @@ export class TrackBuilder {
 
       const rotation = Math.atan2(tangent.x, tangent.z);
 
-      result.push({
-        x: point.x + side * perpX * (halfWidth + barrierOffset),
-        z: point.z + side * perpZ * (halfWidth + barrierOffset),
-        rotation,
-      });
+      const x = point.x + side * perpX * (halfWidth + barrierOffset);
+      const z = point.z + side * perpZ * (halfWidth + barrierOffset);
+
+      // Check distance from last placed barrier to prevent overlap on tight curves
+      if (result.length > 0) {
+        const last = result[result.length - 1];
+        const dist = Math.sqrt((x - last.x) ** 2 + (z - last.z) ** 2);
+        if (dist < minBarrierDistance) continue; // Skip this barrier
+      }
+
+      result.push({ x, z, rotation });
     }
 
     return result;
@@ -265,22 +316,247 @@ export class TrackBuilder {
   }
 
   private createGround(): void {
-    // Base ground
-    const groundGeo = new THREE.PlaneGeometry(500, 500, 25, 25);
-    const groundMat = new THREE.MeshStandardMaterial({
-      color: PIXEL_COLORS.green,
-      flatShading: true,
-    });
-    const ground = new THREE.Mesh(groundGeo, groundMat);
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = 0;
-    ground.receiveShadow = true;
-    this.scene.add(ground);
+    // Create grass with striped texture (like mowed lawn)
+    const stripeWidth = 20; // Width of each grass stripe
+    const groundSize = 500;
+    const numStripes = Math.ceil(groundSize / stripeWidth);
 
-    // Grid overlay
-    const gridHelper = new THREE.GridHelper(500, 50, PIXEL_COLORS.dark, PIXEL_COLORS.dark);
-    gridHelper.position.y = 0.01;
-    this.scene.add(gridHelper);
+    // Grass colors - alternating light and dark green
+    const grassDark = 0x15803d;
+    const grassLight = 0x22c55e;
+
+    // Create striped grass ground
+    for (let i = 0; i < numStripes; i++) {
+      const stripeGeo = new THREE.PlaneGeometry(groundSize, stripeWidth);
+      const stripeMat = new THREE.MeshStandardMaterial({
+        color: i % 2 === 0 ? grassDark : grassLight,
+        flatShading: true,
+        roughness: 1.0,
+        metalness: 0.0,
+      });
+      const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+      stripe.rotation.x = -Math.PI / 2;
+      stripe.position.set(0, 0, -groundSize / 2 + stripeWidth / 2 + i * stripeWidth);
+      stripe.receiveShadow = true;
+      this.scene.add(stripe);
+    }
+
+    // Create sky dome
+    this.createSky();
+
+    // Create grandstands along the track
+    this.createGrandstands();
+  }
+
+  private createSky(): void {
+    // Sky gradient dome
+    const skyGeo = new THREE.SphereGeometry(400, 32, 32);
+    const skyMat = new THREE.ShaderMaterial({
+      uniforms: {
+        topColor: { value: new THREE.Color(0x1a4d7c) },
+        bottomColor: { value: new THREE.Color(0x87CEEB) },
+        offset: { value: 10 },
+        exponent: { value: 0.6 }
+      },
+      vertexShader: `
+        varying vec3 vWorldPosition;
+        void main() {
+          vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+          vWorldPosition = worldPosition.xyz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 topColor;
+        uniform vec3 bottomColor;
+        uniform float offset;
+        uniform float exponent;
+        varying vec3 vWorldPosition;
+        void main() {
+          float h = normalize(vWorldPosition + offset).y;
+          gl_FragColor = vec4(mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0)), 1.0);
+        }
+      `,
+      side: THREE.BackSide
+    });
+    const sky = new THREE.Mesh(skyGeo, skyMat);
+    this.scene.add(sky);
+
+    // Sun
+    const sunGeo = new THREE.CircleGeometry(20, 32);
+    const sunMat = new THREE.MeshBasicMaterial({ color: 0xFFE87C });
+    const sun = new THREE.Mesh(sunGeo, sunMat);
+    sun.position.set(150, 180, -200);
+    sun.lookAt(0, 0, 0);
+    this.scene.add(sun);
+
+    // Sun glow
+    const glowGeo = new THREE.CircleGeometry(40, 32);
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: 0xFFFF99,
+      transparent: true,
+      opacity: 0.3
+    });
+    const glow = new THREE.Mesh(glowGeo, glowMat);
+    glow.position.set(150, 180, -199);
+    glow.lookAt(0, 0, 0);
+    this.scene.add(glow);
+
+    // Clouds
+    this.createCloud(80, 120, -150, 30);
+    this.createCloud(-100, 100, -180, 25);
+    this.createCloud(200, 90, -160, 20);
+    this.createCloud(-50, 130, -140, 35);
+  }
+
+  private createCloud(x: number, y: number, z: number, size: number): void {
+    const cloudGroup = new THREE.Group();
+    const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
+    // Create puffy cloud from multiple spheres
+    const positions = [
+      { x: 0, y: 0, z: 0, s: 1 },
+      { x: size * 0.5, y: size * 0.1, z: 0, s: 0.8 },
+      { x: -size * 0.4, y: size * 0.05, z: 0, s: 0.7 },
+      { x: size * 0.2, y: size * 0.3, z: 0, s: 0.6 },
+      { x: -size * 0.2, y: size * 0.2, z: 0, s: 0.5 },
+    ];
+
+    positions.forEach(pos => {
+      const sphereGeo = new THREE.SphereGeometry(size * pos.s * 0.4, 8, 8);
+      const sphere = new THREE.Mesh(sphereGeo, cloudMat);
+      sphere.position.set(pos.x, pos.y, pos.z);
+      cloudGroup.add(sphere);
+    });
+
+    cloudGroup.position.set(x, y, z);
+    this.scene.add(cloudGroup);
+  }
+
+  private createGrandstands(): void {
+    if (!this.trackCurve) return;
+
+    // Place grandstands at specific points along the track
+    const grandstandPositions = [
+      { t: 0.05, side: 'left' as const },   // Near start
+      { t: 0.05, side: 'right' as const },
+      { t: 0.4, side: 'left' as const },    // Mid track
+      { t: 0.7, side: 'right' as const },   // Far section
+    ];
+
+    grandstandPositions.forEach(({ t, side }) => {
+      const point = this.trackCurve!.getPoint(t);
+      const tangent = this.trackCurve!.getTangent(t);
+      const width = this.getWidthAtT(t);
+
+      // Calculate perpendicular direction (left side of track when traveling forward)
+      const perpX = -tangent.z;
+      const perpZ = tangent.x;
+
+      // Position grandstand outside the track
+      const offset = width / 2 + 25; // Distance from track center
+      const x = point.x + (side === 'left' ? perpX : -perpX) * offset;
+      const z = point.z + (side === 'left' ? perpZ : -perpZ) * offset;
+
+      // Rotation: grandstand should face toward the track (toward point)
+      // Direction from grandstand to track center
+      const toTrackX = point.x - x;
+      const toTrackZ = point.z - z;
+      const rotation = Math.atan2(toTrackX, toTrackZ);
+
+      this.createGrandstand(x, z, rotation);
+    });
+  }
+
+  private createGrandstand(x: number, z: number, rotation: number): void {
+    const standGroup = new THREE.Group();
+
+    // Grandstand dimensions
+    const width = 40;
+    const depth = 15;
+    const tierHeight = 3;
+    const numTiers = 5;
+
+    // Colors
+    const tierColors = [0x8090a0, 0x90a0b0, 0xa0b0c0, 0xb0c0d0, 0xc0d0e0];
+    const frontColor = 0x607080;
+    const crowdColors = [0xef4444, 0x3b82f6, 0xfbbf24, 0x22c55e, 0xf97316, 0xa855f7];
+
+    // Create tiers
+    for (let tier = 0; tier < numTiers; tier++) {
+      const tierDepth = depth * (1 - tier * 0.15);
+      const tierY = tier * tierHeight;
+
+      // Tier platform
+      const platformGeo = new THREE.BoxGeometry(width, tierHeight * 0.3, tierDepth);
+      const platformMat = new THREE.MeshStandardMaterial({
+        color: tierColors[tier],
+        flatShading: true,
+        roughness: 1.0,
+      });
+      const platform = new THREE.Mesh(platformGeo, platformMat);
+      platform.position.set(0, tierY + tierHeight * 0.15, -tier * 2);
+      platform.castShadow = true;
+      platform.receiveShadow = true;
+      standGroup.add(platform);
+
+      // Front face (riser)
+      const riserGeo = new THREE.BoxGeometry(width, tierHeight * 0.7, 0.5);
+      const riserMat = new THREE.MeshStandardMaterial({
+        color: frontColor,
+        flatShading: true,
+        roughness: 1.0,
+      });
+      const riser = new THREE.Mesh(riserGeo, riserMat);
+      riser.position.set(0, tierY + tierHeight * 0.35, tierDepth / 2 - tier * 2);
+      standGroup.add(riser);
+
+      // Add crowd (colored boxes)
+      const crowdSpacing = 2;
+      const cols = Math.floor(width / crowdSpacing) - 1;
+      const rows = Math.floor(tierDepth / crowdSpacing) - 1;
+
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          // Use deterministic "random" based on position
+          const seed = (tier * 1000 + row * 100 + col) * 9999;
+          const rand = Math.abs(Math.sin(seed)) ;
+
+          if (rand < 0.85) { // 85% crowd density
+            const crowdGeo = new THREE.BoxGeometry(1, 1.5, 1);
+            const colorIdx = Math.floor(Math.abs(Math.sin(seed + 0.5)) * crowdColors.length);
+            const crowdMat = new THREE.MeshStandardMaterial({
+              color: crowdColors[colorIdx],
+              flatShading: true,
+              roughness: 1.0,
+            });
+            const person = new THREE.Mesh(crowdGeo, crowdMat);
+            person.position.set(
+              -width / 2 + crowdSpacing + col * crowdSpacing,
+              tierY + tierHeight * 0.3 + 0.75,
+              tierDepth / 2 - crowdSpacing - row * crowdSpacing - tier * 2
+            );
+            standGroup.add(person);
+          }
+        }
+      }
+    }
+
+    // Back wall
+    const backWallGeo = new THREE.BoxGeometry(width, numTiers * tierHeight, 2);
+    const backWallMat = new THREE.MeshStandardMaterial({
+      color: 0x4a5a6a,
+      flatShading: true,
+      roughness: 1.0,
+    });
+    const backWall = new THREE.Mesh(backWallGeo, backWallMat);
+    backWall.position.set(0, numTiers * tierHeight / 2, -depth / 2 - numTiers * 2);
+    standGroup.add(backWall);
+
+    // Position and rotate the entire grandstand
+    standGroup.position.set(x, 0, z);
+    standGroup.rotation.y = rotation;
+    this.scene.add(standGroup);
   }
 
   private createTrackSurface(): void {
@@ -294,9 +570,9 @@ export class TrackBuilder {
     const colors: number[] = [];
     const indices: number[] = [];
 
-    // Colors for alternating segments
-    const darkColor = new THREE.Color(PIXEL_COLORS.dark);
-    const midColor = new THREE.Color(PIXEL_COLORS.mid);
+    // Colors for alternating track segments (asphalt)
+    const darkColor = new THREE.Color(PIXEL_COLORS.asphalt);
+    const midColor = new THREE.Color(PIXEL_COLORS.asphaltAlt);
 
     // Generate vertices along the curve
     for (let i = 0; i <= numSegments; i++) {
@@ -352,55 +628,37 @@ export class TrackBuilder {
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
 
-    // Create material with vertex colors
+    // Create material with vertex colors - matte finish
     const material = new THREE.MeshStandardMaterial({
       vertexColors: true,
       flatShading: true,
+      roughness: 1.0,
+      metalness: 0.0,
     });
 
     const trackMesh = new THREE.Mesh(geometry, material);
     trackMesh.receiveShadow = true;
     this.scene.add(trackMesh);
-
-    // Add checkpoint markings
-    for (let i = 0; i < waypoints.length; i++) {
-      if (waypoints[i].isCheckpoint) {
-        const t = i / waypoints.length;
-        const point = this.trackCurve.getPoint(t);
-        const tangent = this.trackCurve.getTangent(t);
-        const rotation = Math.atan2(tangent.x, tangent.z);
-        this.addCheckpointMarking(point.x, point.z, rotation, waypoints[i].width);
-      }
-    }
-  }
-
-  private addCheckpointMarking(x: number, z: number, rotation: number, width: number): void {
-    const lineGeo = new THREE.PlaneGeometry(width, 1);
-    const lineMat = new THREE.MeshBasicMaterial({
-      color: PIXEL_COLORS.yellow,
-      transparent: true,
-      opacity: 0.6,
-    });
-    const line = new THREE.Mesh(lineGeo, lineMat);
-    line.rotation.x = -Math.PI / 2;
-    line.rotation.z = rotation;
-    line.position.set(x, 0.03, z);
-    this.scene.add(line);
   }
 
   private createBarriers(): void {
-    const barrierGeo = new THREE.BoxGeometry(3, 1.5, 3);
+    // Thicker barriers to prevent tunneling at high speeds
+    const barrierGeo = new THREE.BoxGeometry(4, 1.5, 3);
     const redMat = new THREE.MeshStandardMaterial({
       color: PIXEL_COLORS.red,
       flatShading: true,
+      roughness: 1.0,
+      metalness: 0.0,
     });
     const whiteMat = new THREE.MeshStandardMaterial({
       color: PIXEL_COLORS.white,
       flatShading: true,
+      roughness: 1.0,
+      metalness: 0.0,
     });
 
-    // Create physics bodies for barriers
-    const barrierShape = new CANNON.Box(new CANNON.Vec3(1.5, 0.75, 1.5));
+    // Create physics bodies for barriers (thicker in perpendicular direction)
+    const barrierShape = new CANNON.Box(new CANNON.Vec3(2, 0.75, 1.5));
 
     let colorIndex = 0;
 

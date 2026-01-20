@@ -7,26 +7,26 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // Legacy colors
-        primary: '#ffa300',
-        secondary: '#29adff',
-        dark: '#0a0a0f',
-        // Pixel palette
+        // F1 Professional Racing Theme
+        primary: '#dc2626',
+        secondary: '#2563eb',
+        dark: '#171717',
+        // Pixel palette - F1 themed
         pixel: {
-          black: '#0f0f23',
-          dark: '#1a1a2e',
-          mid: '#2d2d44',
-          light: '#4a4a6a',
-          red: '#ff004d',
-          orange: '#ffa300',
-          yellow: '#ffec27',
-          green: '#00e436',
-          cyan: '#29adff',
-          blue: '#1d2b53',
-          purple: '#7e2553',
-          pink: '#ff77a8',
-          white: '#fff1e8',
-          gray: '#5f574f',
+          black: '#171717',   // Carbon black
+          dark: '#262626',    // Charcoal
+          mid: '#404040',     // Slate
+          light: '#737373',   // Inactive
+          red: '#dc2626',     // Racing red
+          orange: '#ea580c',  // McLaren orange
+          yellow: '#fbbf24',  // Caution yellow
+          green: '#0d9488',   // Aston Martin teal
+          cyan: '#525252',    // Neutral
+          blue: '#2563eb',    // Williams blue
+          purple: '#525252',  // Neutral
+          pink: '#dc2626',    // Same as red
+          white: '#ffffff',   // Pure white
+          gray: '#a3a3a3',    // Chrome silver
         },
       },
       fontFamily: {
@@ -34,12 +34,9 @@ module.exports = {
         'pixel-body': ['"VT323"', 'monospace'],
       },
       boxShadow: {
-        'pixel': '4px 4px 0 #0f0f23',
-        'pixel-sm': '2px 2px 0 #0f0f23',
-        'pixel-lg': '6px 6px 0 #0f0f23',
-        'neon-cyan': '0 0 10px #29adff, 0 0 20px #29adff',
-        'neon-red': '0 0 10px #ff004d, 0 0 20px #ff004d',
-        'neon-green': '0 0 10px #00e436, 0 0 20px #00e436',
+        'pixel': '4px 4px 0 #171717',
+        'pixel-sm': '2px 2px 0 #171717',
+        'pixel-lg': '6px 6px 0 #171717',
       },
       animation: {
         'blink': 'blink 1s infinite',

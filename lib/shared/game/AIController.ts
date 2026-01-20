@@ -157,7 +157,13 @@ export class AIController {
     obstacles: VehicleState[]
   ): { throttle: number; brake: boolean } {
     const speed = state.speed;
-    const targetSpeed = (target.speedLimit || 100) * this.config.maxSpeedFactor;
+    const currentTargetSpeed = (target.speedLimit || 100) * this.config.maxSpeedFactor;
+
+    // Look ahead to find the lowest speed limit in the upcoming waypoints
+    const lookaheadResult = this.getLookaheadSpeedLimit(state);
+
+    // Use the lower of current target or lookahead speed limit
+    const targetSpeed = Math.min(currentTargetSpeed, lookaheadResult.speedLimit);
 
     // Check for nearby obstacles
     const obstacleAhead = this.checkObstacleAhead(state, obstacles);
@@ -175,13 +181,20 @@ export class AIController {
       // Slow down for obstacle
       throttle = 0;
       brake = speed > obstacleAhead.safeSpeed;
+    } else if (lookaheadResult.needsBraking && speed > targetSpeed * 1.05) {
+      // Need to brake for upcoming corner - more aggressive braking
+      throttle = 0;
+      brake = true;
     } else if (speed > targetSpeed * 1.1) {
       // Over speed limit
       throttle = 0;
-      brake = speed > targetSpeed * 1.2;
-    } else if (speed > targetSpeed * 0.9) {
-      // Near speed limit
-      throttle = 0.3;
+      brake = speed > targetSpeed * 1.15;
+    } else if (speed > targetSpeed * 0.95) {
+      // Near speed limit - coast
+      throttle = 0.2;
+    } else if (speed > targetSpeed * 0.85) {
+      // Approaching speed limit
+      throttle = 0.5;
     } else {
       // Below speed limit, accelerate
       throttle = Math.min(1, this.config.aggressiveness + 0.5);
@@ -191,6 +204,59 @@ export class AIController {
     throttle *= (0.9 + this.config.skillLevel * 0.1);
 
     return { throttle, brake };
+  }
+
+  private getLookaheadSpeedLimit(state: VehicleState): { speedLimit: number; needsBraking: boolean } {
+    const speed = state.speed;
+
+    // Calculate braking distance based on current speed
+    // Approximate braking distance = (speed^2) / (2 * deceleration)
+    // At ~100 km/h (27.8 m/s), with deceleration of ~10 m/s^2, distance ~= 38m
+    const speedMs = speed / 3.6; // Convert km/h to m/s
+    const brakingDistance = (speedMs * speedMs) / 18; // Assume ~9 m/s^2 deceleration
+    const lookaheadDistance = Math.max(30, brakingDistance * 1.5); // Add safety margin
+
+    // Look at upcoming waypoints within braking distance
+    const numWaypointsToCheck = Math.min(6, Math.ceil(lookaheadDistance / 15));
+    let lowestSpeedLimit = 200;
+    let distanceToCorner = 0;
+
+    const currentPos = { x: state.position.x, z: state.position.z };
+
+    for (let i = 0; i < numWaypointsToCheck; i++) {
+      const waypointIdx = (this.currentWaypointIndex + i) % this.waypoints.length;
+      const waypoint = this.waypoints[waypointIdx];
+
+      // Calculate cumulative distance to this waypoint
+      if (i === 0) {
+        const dx = waypoint.x - currentPos.x;
+        const dz = waypoint.z - currentPos.z;
+        distanceToCorner = Math.sqrt(dx * dx + dz * dz);
+      } else {
+        const prevWaypoint = this.waypoints[(waypointIdx - 1 + this.waypoints.length) % this.waypoints.length];
+        const dx = waypoint.x - prevWaypoint.x;
+        const dz = waypoint.z - prevWaypoint.z;
+        distanceToCorner += Math.sqrt(dx * dx + dz * dz);
+      }
+
+      // Check if this waypoint has a lower speed limit
+      const waypointSpeedLimit = (waypoint.speedLimit || 100) * this.config.maxSpeedFactor;
+      if (waypointSpeedLimit < lowestSpeedLimit) {
+        lowestSpeedLimit = waypointSpeedLimit;
+      }
+
+      // Stop looking if we're past the braking distance
+      if (distanceToCorner > lookaheadDistance) break;
+    }
+
+    // Determine if we need to brake now
+    const speedDiff = speed - lowestSpeedLimit;
+    const needsBraking = speedDiff > 10 && distanceToCorner < brakingDistance * 1.2;
+
+    return {
+      speedLimit: lowestSpeedLimit,
+      needsBraking
+    };
   }
 
   private checkObstacleAhead(

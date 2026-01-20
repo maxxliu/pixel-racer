@@ -1,5 +1,7 @@
 'use client';
 
+import { memo } from 'react';
+
 export interface MinimapData {
   centerPath: string;
   innerPath: string;
@@ -23,7 +25,7 @@ interface HUDProps {
   minimapData?: MinimapData;
 }
 
-export default function HUD({
+function HUD({
   speed,
   rpm,
   gear,
@@ -278,3 +280,5 @@ export default function HUD({
     </div>
   );
 }
+
+export default memo(HUD);

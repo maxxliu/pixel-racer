@@ -58,10 +58,15 @@ export class InputManager {
   }
 
   private handleKeyDown = (event: KeyboardEvent): void => {
+    // Don't capture input when user is typing in a form field
+    const target = event.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+      return;
+    }
+
     // Prevent default for game keys
     if (this.isGameKey(event.code)) {
       event.preventDefault();
-      console.log('Game key pressed:', event.code);
     }
     this.keyState.set(event.code, true);
     this.inputSource = 'keyboard';

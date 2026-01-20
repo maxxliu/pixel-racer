@@ -13,8 +13,9 @@ const GameCanvas = dynamic(() => import('@/components/game/GameCanvas'), {
 function PlayContent() {
   const searchParams = useSearchParams();
   const mode = searchParams.get('mode') || 'time-trial';
+  const custom = searchParams.get('custom') === 'true';
 
-  return <GameCanvas gameMode={mode as 'time-trial' | 'race'} />;
+  return <GameCanvas gameMode={mode as 'time-trial' | 'race'} customTrack={custom} />;
 }
 
 export default function PlayPage() {

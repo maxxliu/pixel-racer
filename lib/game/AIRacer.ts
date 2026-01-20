@@ -4,12 +4,12 @@ import { AIController, AIPersonality } from '@/lib/shared/game/AIController';
 import { VehicleState } from '@/lib/shared/physics/VehiclePhysics';
 import { TrackWaypoint } from './TrackBuilder';
 
-// 8-bit color palette for AI cars
+// F1 Team colors for AI cars
 const AI_CAR_COLORS = [
-  0x29adff, // Cyan
-  0x00e436, // Green
-  0xffa300, // Orange
-  0x7e2553, // Purple
+  0x2563eb, // Williams/Alpine Blue
+  0xea580c, // McLaren Orange
+  0x0d9488, // Aston Martin Teal
+  0xfbbf24, // Renault Yellow
 ];
 
 export interface AIRacerState {
@@ -100,33 +100,39 @@ export class AIRacer {
   private createCarMesh(color: number): THREE.Group {
     const group = new THREE.Group();
 
-    // Body
+    // Body - team color with matte finish
     const bodyGeo = new THREE.BoxGeometry(2, 0.6, 4);
     const bodyMat = new THREE.MeshStandardMaterial({
       color,
       flatShading: true,
+      roughness: 1.0,
+      metalness: 0.0,
     });
     const body = new THREE.Mesh(bodyGeo, bodyMat);
     body.position.y = 0.3;
     body.castShadow = true;
     group.add(body);
 
-    // Cabin
+    // Cabin - dark charcoal
     const cabinGeo = new THREE.BoxGeometry(1.6, 0.5, 1.8);
     const cabinMat = new THREE.MeshStandardMaterial({
-      color: 0x29adff,
+      color: 0x262626,
       flatShading: true,
+      roughness: 1.0,
+      metalness: 0.0,
     });
     const cabin = new THREE.Mesh(cabinGeo, cabinMat);
     cabin.position.set(0, 0.75, -0.3);
     cabin.castShadow = true;
     group.add(cabin);
 
-    // Wheels
+    // Wheels - dark
     const wheelGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
     const wheelMat = new THREE.MeshStandardMaterial({
-      color: 0x1a1a2e,
+      color: 0x262626,
       flatShading: true,
+      roughness: 1.0,
+      metalness: 0.0,
     });
 
     const wheelPositions = [
@@ -230,7 +236,7 @@ export class AIRacer {
       if (this.lastZ < -10 && currentZ >= -10 && !this.crossedFinishLine) {
         this.crossedFinishLine = true;
         this.lap++;
-      } else if (currentZ < -20) {
+      } else if (currentZ < -30) {
         this.crossedFinishLine = false;
       }
     }
@@ -280,6 +286,8 @@ export class AIRacer {
   public reset(startPos: { x: number; z: number; rotation: number }): void {
     this.body.position.set(startPos.x, 0.75, startPos.z);
     this.body.quaternion.setFromEuler(0, startPos.rotation, 0);
+    this.body.velocity.set(0, 0, 0);
+    this.body.angularVelocity.set(0, 0, 0);
     this.carSpeed = 0;
     this.carRotation = startPos.rotation;
     this.lap = 1;

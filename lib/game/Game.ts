@@ -3,8 +3,9 @@ import * as CANNON from 'cannon-es';
 import { Engine } from './Engine';
 import { GameLoop } from './GameLoop';
 import { InputManager } from '@/lib/input/InputManager';
-import { TrackBuilder, TrackWaypoint, MinimapData } from './TrackBuilder';
+import { TrackBuilder, TrackBuilderOptions, TrackWaypoint, MinimapData } from './TrackBuilder';
 export type { MinimapData } from './TrackBuilder';
+export type { TrackWaypoint } from './TrackBuilder';
 import { SkidMarkManager } from './SkidMarkManager';
 import { AIRacer } from './AIRacer';
 import { VehicleState } from '@/lib/shared/physics/VehiclePhysics';
@@ -20,8 +21,15 @@ export interface RaceResults {
   position?: number;
 }
 
+export interface CustomTrackData {
+  waypoints: TrackWaypoint[];
+  startPosition: { x: number; z: number; rotation: number };
+  id?: string;
+}
+
 export interface GameOptions {
   gameMode?: GameMode;
+  customTrack?: CustomTrackData;
   onProgressUpdate?: (progress: number, message: string) => void;
   onGameStateUpdate?: (state: GameState) => void;
   onPause?: () => void;
@@ -43,22 +51,22 @@ export interface GameState {
   carRotation: number;
 }
 
-// 8-bit color palette
+// F1 Professional Racing color palette
 const PIXEL_COLORS = {
-  black: 0x0f0f23,
-  dark: 0x1a1a2e,
-  mid: 0x2d2d44,
-  light: 0x4a4a6a,
-  red: 0xff004d,
-  orange: 0xffa300,
-  yellow: 0xffec27,
-  green: 0x00e436,
-  cyan: 0x29adff,
-  blue: 0x1d2b53,
-  purple: 0x7e2553,
-  pink: 0xff77a8,
-  white: 0xfff1e8,
-  gray: 0x5f574f,
+  black: 0x171717,    // Carbon black - player car body
+  dark: 0x262626,     // Charcoal - wheels
+  mid: 0x404040,      // Slate
+  light: 0x737373,    // Inactive
+  red: 0xdc2626,      // Racing red - player accent
+  orange: 0xea580c,   // McLaren orange
+  yellow: 0xfbbf24,   // Headlights
+  green: 0x0d9488,    // Teal
+  cyan: 0x525252,     // Neutral
+  blue: 0x2563eb,     // Williams blue
+  purple: 0x525252,   // Neutral
+  pink: 0xdc2626,     // Same as red
+  white: 0xffffff,    // Pure white
+  gray: 0xa3a3a3,     // Chrome silver
 };
 
 export class Game {
@@ -114,10 +122,14 @@ export class Game {
   private crossedFinishLine = false;
   private lapTimes: number[] = [];
   private raceComplete = false;
+  private currentLap = 1;
+  private bestLapTime = 0;
+  private racePosition = 1;
+  private raceStarted = false; // Timer doesn't start until player moves
 
   // Throttle UI updates
   private lastUIUpdate = 0;
-  private readonly UI_UPDATE_INTERVAL = 100;
+  private readonly UI_UPDATE_INTERVAL = 16;
 
   // Skid detection
   private lastSkidTime = 0;
@@ -160,8 +172,14 @@ export class Game {
       this.initPhysics();
       this.reportProgress(30, 'PHYSICS READY');
 
-      // Build track
-      this.trackBuilder = new TrackBuilder(this.engine.scene, this.world);
+      // Build track (custom or default)
+      const trackBuilderOptions: TrackBuilderOptions = {};
+      if (this.options.customTrack) {
+        trackBuilderOptions.customWaypoints = this.options.customTrack.waypoints;
+        trackBuilderOptions.customStartPosition = this.options.customTrack.startPosition;
+      }
+
+      this.trackBuilder = new TrackBuilder(this.engine.scene, this.world, trackBuilderOptions);
       const trackData = this.trackBuilder.build();
       this.waypoints = trackData.waypoints;
       this.startPosition = this.trackBuilder.getStartPosition();
@@ -192,10 +210,13 @@ export class Game {
       this.gameLoop.onUpdate((dt) => this.update(dt));
       this.gameLoop.onRender(() => this.render());
 
-      // Initialize lap tracking
-      this.lapStartTime = performance.now();
-      this.raceStartTime = performance.now();
-      this.lastZ = this.startPosition.z;
+      // Initialize lap tracking - timer starts when player first moves
+      this.lapStartTime = 0;
+      this.raceStartTime = 0;
+      this.raceStarted = false;
+      // Initialize lastZ to a positive value so car must complete a full lap first
+      // (lastZ is repurposed as forward distance from finish line)
+      this.lastZ = 5;
       this.lapTimes = [];
       this.raceComplete = false;
 
@@ -217,7 +238,7 @@ export class Game {
     this.world = new CANNON.World();
     this.world.gravity.set(0, -20, 0);
     this.world.broadphase = new CANNON.SAPBroadphase(this.world);
-    (this.world.solver as CANNON.GSSolver).iterations = 10;
+    (this.world.solver as CANNON.GSSolver).iterations = 20;
 
     // Create materials
     const groundMaterial = new CANNON.Material('ground');
@@ -246,8 +267,8 @@ export class Game {
   private setupCollisionMaterials(): void {
     // Barrier-car contact
     const barrierCarContact = new CANNON.ContactMaterial(this.barrierMaterial, this.carMaterial, {
-      friction: 0.3,
-      restitution: 0.5,
+      friction: 0.5,
+      restitution: 0.1,
     });
     this.world.addContactMaterial(barrierCarContact);
 
@@ -290,33 +311,51 @@ export class Game {
     this.carMesh = new THREE.Group();
     this.wheelMeshes = [];
 
-    // Body - main block
+    // Body - main block (carbon black)
     const bodyGeo = new THREE.BoxGeometry(2, 0.6, 4);
     const bodyMat = new THREE.MeshStandardMaterial({
-      color: PIXEL_COLORS.red,
+      color: PIXEL_COLORS.black,
       flatShading: true,
+      roughness: 1.0,
+      metalness: 0.0,
     });
     const body = new THREE.Mesh(bodyGeo, bodyMat);
     body.position.y = 0.3;
     body.castShadow = true;
     this.carMesh.add(body);
 
-    // Cabin
+    // Red racing stripe on top
+    const stripeGeo = new THREE.BoxGeometry(0.4, 0.02, 3.8);
+    const stripeMat = new THREE.MeshStandardMaterial({
+      color: PIXEL_COLORS.red,
+      flatShading: true,
+      roughness: 1.0,
+      metalness: 0.0,
+    });
+    const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+    stripe.position.set(0, 0.61, 0);
+    this.carMesh.add(stripe);
+
+    // Cabin (dark gray)
     const cabinGeo = new THREE.BoxGeometry(1.6, 0.5, 1.8);
     const cabinMat = new THREE.MeshStandardMaterial({
-      color: PIXEL_COLORS.cyan,
+      color: PIXEL_COLORS.dark,
       flatShading: true,
+      roughness: 1.0,
+      metalness: 0.0,
     });
     const cabin = new THREE.Mesh(cabinGeo, cabinMat);
     cabin.position.set(0, 0.75, -0.3);
     cabin.castShadow = true;
     this.carMesh.add(cabin);
 
-    // Wheels
+    // Wheels (dark charcoal)
     const wheelGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
     const wheelMat = new THREE.MeshStandardMaterial({
       color: PIXEL_COLORS.dark,
       flatShading: true,
+      roughness: 1.0,
+      metalness: 0.0,
     });
 
     const wheelPositions = [
@@ -334,13 +373,13 @@ export class Game {
       this.wheelMeshes.push(wheel);
     });
 
-    // Headlights
+    // Headlights (warm yellow)
     const headlightGeo = new THREE.BoxGeometry(0.3, 0.3, 0.1);
     const headlightMat = new THREE.MeshStandardMaterial({
       color: PIXEL_COLORS.yellow,
-      emissive: PIXEL_COLORS.yellow,
-      emissiveIntensity: 0.5,
       flatShading: true,
+      roughness: 1.0,
+      metalness: 0.0,
     });
 
     const hl1 = new THREE.Mesh(headlightGeo, headlightMat);
@@ -351,13 +390,13 @@ export class Game {
     hl2.position.set(0.6, 0.3, 2);
     this.carMesh.add(hl2);
 
-    // Taillights
+    // Taillights (red to match stripe)
     const taillightGeo = new THREE.BoxGeometry(0.3, 0.2, 0.1);
     const taillightMat = new THREE.MeshStandardMaterial({
-      color: PIXEL_COLORS.orange,
-      emissive: PIXEL_COLORS.orange,
-      emissiveIntensity: 0.3,
+      color: PIXEL_COLORS.red,
       flatShading: true,
+      roughness: 1.0,
+      metalness: 0.0,
     });
 
     const tl1 = new THREE.Mesh(taillightGeo, taillightMat);
@@ -418,8 +457,8 @@ export class Game {
     // Update AI racers
     this.updateAIRacers(deltaTime);
 
-    // Step physics world
-    this.world.step(1 / 60, deltaTime, 3);
+    // Step physics world with higher substep count for better collision detection
+    this.world.step(1 / 120, deltaTime, 10);
 
     // Force car to correct height after physics
     this.carBody.position.y = 0.75;
@@ -438,6 +477,13 @@ export class Game {
   }
 
   private updatePlayerCar(deltaTime: number, input: { throttle: number; steering: number }): void {
+    // Start the race timer when player first provides throttle input
+    if (!this.raceStarted && input.throttle > 0) {
+      this.raceStarted = true;
+      this.lapStartTime = performance.now();
+      this.raceStartTime = performance.now();
+    }
+
     // Acceleration
     if (input.throttle > 0) {
       this.carSpeed = Math.min(this.carSpeed + this.acceleration * deltaTime, this.maxSpeed);
@@ -540,31 +586,54 @@ export class Game {
     const currentX = this.carBody.position.x;
     const currentZ = this.carBody.position.z;
 
-    // Finish line is at z=0, x=0 (start position)
-    if (Math.abs(currentX) < 12 && !this.raceComplete) {
-      if (this.lastZ < 0 && currentZ >= 0 && !this.crossedFinishLine) {
+    // Use the actual start position and track direction for finish line detection
+    const startX = this.startPosition.x;
+    const startZ = this.startPosition.z;
+    const trackDir = this.startPosition.rotation;
+
+    // Calculate distance along the track direction from start
+    // This gives us a signed distance: positive when past the line in track direction
+    const dx = currentX - startX;
+    const dz = currentZ - startZ;
+
+    // Project onto track direction (forward = positive)
+    const forwardDist = dx * Math.sin(trackDir) + dz * Math.cos(trackDir);
+
+    // Project onto perpendicular (lateral distance from finish line)
+    const lateralDist = Math.abs(dx * Math.cos(trackDir) - dz * Math.sin(trackDir));
+
+    // Track the previous forward distance
+    const prevForwardDist = this.lastZ; // Repurposing lastZ as lastForwardDist
+
+    // Finish line width based on track width at start
+    const finishLineWidth = this.waypoints[0]?.width || 16;
+
+    if (lateralDist < finishLineWidth / 2 && !this.raceComplete) {
+      // Crossed from behind (-) to in front (+) of finish line
+      if (prevForwardDist < 0 && forwardDist >= 0 && !this.crossedFinishLine) {
         this.crossedFinishLine = true;
         const lapTime = performance.now() - this.lapStartTime;
 
-        if (this.gameState.lap > 0) {
+        if (this.currentLap > 0) {
           this.lapTimes.push(lapTime);
 
-          if (this.gameState.bestLapTime === 0 || lapTime < this.gameState.bestLapTime) {
-            this.gameState.bestLapTime = lapTime;
+          if (this.bestLapTime === 0 || lapTime < this.bestLapTime) {
+            this.bestLapTime = lapTime;
           }
         }
 
-        if (this.gameState.lap >= this.gameState.totalLaps) {
+        if (this.currentLap >= this.gameState.totalLaps) {
           this.completeRace();
         } else {
-          this.gameState.lap++;
+          this.currentLap++;
           this.lapStartTime = performance.now();
         }
-      } else if (currentZ < -10) {
+      } else if (forwardDist < -10) {
+        // Reset flag when car is well behind the line
         this.crossedFinishLine = false;
       }
     }
-    this.lastZ = currentZ;
+    this.lastZ = forwardDist; // Store forward distance for next frame
   }
 
   private updateRacePosition(): void {
@@ -580,11 +649,11 @@ export class Game {
       }
     }
 
-    this.gameState.position = position;
+    this.racePosition = position;
   }
 
   private getPlayerProgress(): number {
-    return this.gameState.lap * 1000 + this.getWaypointProgress(
+    return this.currentLap * 1000 + this.getWaypointProgress(
       this.carBody.position.x,
       this.carBody.position.z
     );
@@ -621,10 +690,10 @@ export class Game {
 
     this.options.onRaceComplete?.({
       totalTime,
-      bestLapTime: this.gameState.bestLapTime,
+      bestLapTime: this.bestLapTime,
       lapTimes: this.lapTimes,
       totalLaps: this.gameState.totalLaps,
-      position: this.gameState.position,
+      position: this.racePosition,
     });
 
     this.pause();
@@ -635,7 +704,8 @@ export class Game {
     if (now - this.lastUIUpdate < this.UI_UPDATE_INTERVAL) return;
     this.lastUIUpdate = now;
 
-    const currentLapTime = now - this.lapStartTime;
+    // Only count time if race has started
+    const currentLapTime = this.raceStarted ? now - this.lapStartTime : 0;
     const speedKmh = Math.abs(this.carSpeed) * 3.6;
 
     let gear = 1;
@@ -657,7 +727,10 @@ export class Game {
       ...this.gameState,
       speed: Math.round(speedKmh),
       gear,
-      lapTime: Math.round(currentLapTime),
+      lap: this.currentLap,
+      position: this.racePosition,
+      lapTime: currentLapTime,
+      bestLapTime: this.bestLapTime,
       carX: this.carBody.position.x,
       carZ: this.carBody.position.z,
       carRotation: this.carRotation,
@@ -708,6 +781,8 @@ export class Game {
   private resetCar(): void {
     this.carBody.position.set(this.startPosition.x, 0.75, this.startPosition.z);
     this.carBody.quaternion.setFromEuler(0, this.startPosition.rotation, 0);
+    this.carBody.velocity.set(0, 0, 0);
+    this.carBody.angularVelocity.set(0, 0, 0);
     this.carSpeed = 0;
     this.carRotation = this.startPosition.rotation;
     this.lapStartTime = performance.now();
@@ -734,15 +809,17 @@ export class Game {
     }
 
     // Reset game state
-    this.gameState.lap = 1;
-    this.gameState.position = 1;
-    this.gameState.bestLapTime = 0;
+    this.currentLap = 1;
+    this.racePosition = 1;
+    this.bestLapTime = 0;
     this.lapTimes = [];
     this.raceComplete = false;
     this.crossedFinishLine = false;
-    this.lapStartTime = performance.now();
-    this.raceStartTime = performance.now();
-    this.lastZ = this.startPosition.z;
+    this.raceStarted = false;
+    this.lapStartTime = 0;
+    this.raceStartTime = 0;
+    // Reset forward distance to positive value so car must complete a full lap
+    this.lastZ = 5;
 
     // Clear skid marks
     this.skidMarkManager.clear();
@@ -775,5 +852,9 @@ export class Game {
   public getMinimapData(): MinimapData | null {
     if (!this.trackBuilder) return null;
     return this.trackBuilder.getMinimapData();
+  }
+
+  public getCustomTrackId(): string | undefined {
+    return this.options.customTrack?.id;
   }
 }

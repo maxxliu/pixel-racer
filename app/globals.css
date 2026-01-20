@@ -5,33 +5,30 @@
 @tailwind utilities;
 
 :root {
-  /* Core palette - 16 colors max like NES */
-  --pixel-black: #0f0f23;
-  --pixel-dark: #1a1a2e;
-  --pixel-mid: #2d2d44;
-  --pixel-light: #4a4a6a;
+  /* F1 Professional Racing Theme */
+  /* Core grayscale */
+  --pixel-black: #171717;   /* Carbon black - backgrounds */
+  --pixel-dark: #262626;    /* Charcoal - panels */
+  --pixel-mid: #404040;     /* Slate - track surface */
+  --pixel-light: #737373;   /* Inactive UI */
 
   /* Primary colors */
-  --pixel-red: #ff004d;
-  --pixel-orange: #ffa300;
-  --pixel-yellow: #ffec27;
-  --pixel-green: #00e436;
-  --pixel-cyan: #29adff;
-  --pixel-blue: #1d2b53;
-  --pixel-purple: #7e2553;
-  --pixel-pink: #ff77a8;
+  --pixel-red: #dc2626;     /* Racing red - accent, player highlights */
+  --pixel-orange: #ea580c;  /* AI car 2 */
+  --pixel-yellow: #fbbf24;  /* Caution yellow, highlights */
+  --pixel-green: #0d9488;   /* AI car 3 (teal) */
+  --pixel-cyan: #525252;    /* Neutral (no cyan) */
+  --pixel-blue: #2563eb;    /* AI car 1 */
+  --pixel-purple: #525252;  /* Neutral */
+  --pixel-pink: #dc2626;    /* Same as red */
 
   /* UI specific */
-  --pixel-white: #fff1e8;
-  --pixel-gray: #5f574f;
-
-  /* Glow effects */
-  --neon-glow: 0 0 10px var(--pixel-cyan), 0 0 20px var(--pixel-cyan);
-  --warning-glow: 0 0 10px var(--pixel-red), 0 0 20px var(--pixel-red);
+  --pixel-white: #ffffff;   /* Pure white - text, UI panels */
+  --pixel-gray: #a3a3a3;    /* Chrome silver - secondary text */
 
   /* Legacy compatibility */
-  --primary: var(--pixel-orange);
-  --secondary: var(--pixel-cyan);
+  --primary: var(--pixel-red);
+  --secondary: var(--pixel-blue);
   --dark: var(--pixel-black);
 }
 
@@ -89,27 +86,14 @@ body {
   pointer-events: auto;
 }
 
-/* Scanline overlay */
+/* Scanline overlay - disabled for F1 theme */
 .scanlines::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: repeating-linear-gradient(
-    transparent 0px, transparent 2px,
-    rgba(0, 0, 0, 0.1) 2px, rgba(0, 0, 0, 0.1) 4px
-  );
-  pointer-events: none;
-  z-index: 1000;
+  display: none;
 }
 
-/* CRT vignette effect */
+/* CRT vignette effect - disabled for F1 theme */
 .crt-vignette::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse at center, transparent 60%, rgba(0, 0, 0, 0.4) 100%);
-  pointer-events: none;
-  z-index: 999;
+  display: none;
 }
 
 /* Pixel border */
@@ -172,7 +156,7 @@ body {
 /* Blinking animation */
 @keyframes blink {
   0%, 49% { opacity: 1; }
-  50%, 100% { opacity: 0; }
+  50%, 100% { opacity: 0.4; }
 }
 
 .animate-blink {
@@ -190,13 +174,13 @@ body {
   animation: flicker 0.1s infinite;
 }
 
-/* Pulse animation */
+/* Pulse animation - disabled for F1 theme */
 @keyframes pixel-pulse {
   0%, 100% {
-    text-shadow: 0 0 10px currentColor, 0 0 20px currentColor;
+    opacity: 1;
   }
   50% {
-    text-shadow: 0 0 20px currentColor, 0 0 40px currentColor;
+    opacity: 0.85;
   }
 }
 
@@ -241,46 +225,60 @@ body {
   background: var(--pixel-red);
 }
 
-/* Legacy button styles (for compatibility) */
+/* Frosted glass button styles */
 .btn {
   padding: 16px 24px;
-  border: 4px solid var(--pixel-white);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
   font-size: 12px;
   font-family: 'Press Start 2P', monospace;
   cursor: pointer;
-  transition: transform 0.1s, box-shadow 0.1s;
+  transition: all 0.2s ease;
   text-transform: uppercase;
-  background: var(--pixel-dark);
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   color: var(--pixel-white);
-  box-shadow: 4px 4px 0 var(--pixel-black);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
   text-decoration: none;
   display: inline-block;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .btn:hover {
-  transform: translate(-2px, -2px);
-  box-shadow: 6px 6px 0 var(--pixel-black);
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.25);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.5);
 }
 
 .btn:active {
-  transform: translate(2px, 2px);
-  box-shadow: 2px 2px 0 var(--pixel-black);
+  transform: translateY(1px);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .btn-primary {
-  background: var(--pixel-red);
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 .btn-primary:hover {
-  background: var(--pixel-pink);
+  background: rgba(255, 255, 255, 0.35);
 }
 
 .btn-secondary {
-  background: var(--pixel-blue);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .btn-secondary:hover {
-  background: var(--pixel-mid);
+  background: rgba(255, 255, 255, 0.2);
 }
 
 /* Pixel text shadow for titles */
@@ -293,12 +291,9 @@ body {
     1px 1px 0 var(--pixel-black);
 }
 
-/* Neon glow text */
+/* Neon glow text - disabled for F1 theme */
 .neon-text {
-  text-shadow:
-    0 0 5px currentColor,
-    0 0 10px currentColor,
-    0 0 20px currentColor;
+  /* No glow effect */
 }
 
 /* Pixel grid background */
@@ -344,4 +339,34 @@ body {
   color: var(--pixel-green);
   padding: 8px 12px;
   border: 2px solid var(--pixel-gray);
+}
+
+/* Leaderboard score slide-in animation */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Custom scrollbar for leaderboard */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 2px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #444;
 }

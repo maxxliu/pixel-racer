@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 
-// 8-bit color palette
+// F1 Professional Racing color palette
 const PIXEL_COLORS = {
-  black: 0x0f0f23,
-  dark: 0x1a1a2e,
-  blue: 0x1d2b53,
-  purple: 0x7e2553,
+  black: 0x171717,    // Carbon black
+  dark: 0x262626,     // Charcoal
+  mid: 0x404040,      // Slate
+  ground: 0x1f2937,   // Dark blue-gray ground
 };
 
 export interface EngineOptions {
@@ -50,11 +50,11 @@ export class Engine {
     // Create scene
     this.scene = new THREE.Scene();
 
-    // Deep pixel-blue sky with gradient bands (not smooth)
-    this.scene.background = new THREE.Color(PIXEL_COLORS.blue);
+    // Dark gray sky for F1 professional look
+    this.scene.background = new THREE.Color(PIXEL_COLORS.black);
 
-    // Reduced fog for clearer pixelated look
-    this.scene.fog = new THREE.Fog(PIXEL_COLORS.blue, 200, 800);
+    // Fog for depth
+    this.scene.fog = new THREE.Fog(PIXEL_COLORS.black, 200, 800);
 
     // Create camera
     this.camera = new THREE.PerspectiveCamera(
@@ -96,8 +96,8 @@ export class Engine {
 
     // Simple hemisphere light for color variation
     const hemisphereLight = new THREE.HemisphereLight(
-      PIXEL_COLORS.blue, // Sky color
-      PIXEL_COLORS.dark, // Ground color
+      PIXEL_COLORS.dark,   // Sky color
+      PIXEL_COLORS.ground, // Ground color
       0.4
     );
     this.scene.add(hemisphereLight);
