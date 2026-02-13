@@ -57,7 +57,7 @@ export default function TrackCard({ track, onPlay }: TrackCardProps) {
         </div>
         <div>
           <span className="text-pixel-gray">Turns:</span>
-          <span className="text-white ml-1">{track.turn_count || '?'}</span>
+          <span className="text-white ml-1">{track.turn_count ?? '?'}</span>
         </div>
         <div>
           <span className="text-pixel-gray">Plays:</span>

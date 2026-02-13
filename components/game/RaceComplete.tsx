@@ -61,9 +61,9 @@ export default function RaceComplete({
         // Normalize field names (API might return camelCase or snake_case)
         const normalized = data.map((entry: Record<string, unknown>) => ({
           id: entry.id,
-          player_name: entry.player_name || entry.playerName,
-          time_ms: entry.time_ms || entry.timeMs,
-          created_at: entry.created_at || entry.createdAt,
+          player_name: entry.player_name ?? entry.playerName,
+          time_ms: entry.time_ms ?? entry.timeMs,
+          created_at: entry.created_at ?? entry.createdAt,
         }));
         setLeaderboard(normalized);
       }

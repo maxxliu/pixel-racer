@@ -96,9 +96,9 @@ export async function POST(request: NextRequest) {
       waypoints: body.waypoints,
       start_position: body.start_position,
       thumbnail_svg: body.thumbnail_svg || null,
-      track_length_m: body.track_length_m || null,
-      difficulty: body.difficulty || null,
-      turn_count: body.turn_count || null,
+      track_length_m: body.track_length_m ?? null,
+      difficulty: body.difficulty ?? null,
+      turn_count: body.turn_count ?? null,
       is_public: body.is_public !== false
     };
 

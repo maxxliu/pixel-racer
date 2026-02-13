@@ -265,7 +265,7 @@ function HUD({
           )}
 
           {/* Car indicator - chunky arrow */}
-          <g transform={`translate(${carPos.x}, ${carPos.y}) rotate(${(carRotation) * 180 / Math.PI})`}>
+          <g transform={`translate(${carPos.x}, ${carPos.y}) rotate(${carRotation * 180 / Math.PI + 180})`}>
             <rect x="-4" y="-8" width="8" height="16" fill="#ff004d" />
             <rect x="-6" y="4" width="4" height="4" fill="#ff004d" />
             <rect x="2" y="4" width="4" height="4" fill="#ff004d" />

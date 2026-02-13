@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
       trackId: entry.track_id,
       trackName: entry.tracks?.name || 'Unknown Track',
       trackDifficulty: entry.tracks?.difficulty || null,
-      trackLength: entry.tracks?.track_length_m || null
+      trackLength: entry.tracks?.track_length_m ?? null
     })) || [];
 
     return NextResponse.json(entries);

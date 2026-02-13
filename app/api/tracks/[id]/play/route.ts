@@ -39,7 +39,7 @@ export async function POST(
 
       const { error: updateError } = await db
         .from('tracks')
-        .update({ play_count: ((track as { play_count?: number })?.play_count || 0) + 1 })
+        .update({ play_count: ((track as { play_count?: number })?.play_count ?? 0) + 1 })
         .eq('id', id);
 
       if (updateError) throw updateError;

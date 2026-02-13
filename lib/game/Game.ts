@@ -848,6 +848,11 @@ export class Game {
     }
     this.aiRacers = [];
 
+    // Remove player car body from physics world
+    if (this.carBody && this.world) {
+      this.world.removeBody(this.carBody);
+    }
+
     // Dispose player car geometries and materials to prevent GPU memory leak
     if (this.carMesh) {
       this.carMesh.traverse((child) => {
