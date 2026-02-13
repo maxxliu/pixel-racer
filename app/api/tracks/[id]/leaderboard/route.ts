@@ -110,7 +110,6 @@ export async function POST(
       game_mode: body.game_mode as 'time-trial' | 'race'
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from('leaderboard_entries')
       .insert(entry)
@@ -120,7 +119,6 @@ export async function POST(
     if (error) throw error;
 
     // Get the rank of this entry
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: rankings, error: rankError } = await (supabase as any)
       .from('leaderboard_entries')
       .select('id')
