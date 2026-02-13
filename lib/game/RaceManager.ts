@@ -39,14 +39,14 @@ export class RaceManager {
       checkpointCount: this.checkpoints.length,
     };
 
-    this.raceStartTime = Date.now();
-    this.lapStartTime = Date.now();
+    this.raceStartTime = performance.now();
+    this.lapStartTime = performance.now();
   }
 
   public update(deltaTime: number, playerState: VehicleState): void {
     if (this.state.phase !== 'racing') return;
 
-    const now = Date.now();
+    const now = performance.now();
 
     // Update times
     this.state.lapTime = now - this.lapStartTime;
@@ -65,8 +65,8 @@ export class RaceManager {
       const dz = cp.z - position.z;
       const distance = Math.sqrt(dx * dx + dz * dz);
 
-      // Check if player is near checkpoint
-      if (distance < cp.width) {
+      // Check if player is near checkpoint (width represents track width, use half for radius)
+      if (distance < cp.width / 2) {
         const expectedCheckpoint = (this.state.lastCheckpoint + 1) % this.checkpoints.length;
 
         if (i === expectedCheckpoint) {
@@ -100,7 +100,7 @@ export class RaceManager {
       this.state.currentLap = this.state.totalLaps; // Cap at total laps
     } else {
       // Start new lap
-      this.lapStartTime = Date.now();
+      this.lapStartTime = performance.now();
       this.state.lapTime = 0;
     }
   }
@@ -122,14 +122,14 @@ export class RaceManager {
       checkpointCount: this.checkpoints.length,
     };
 
-    this.raceStartTime = Date.now();
-    this.lapStartTime = Date.now();
+    this.raceStartTime = performance.now();
+    this.lapStartTime = performance.now();
   }
 
   public startRace(): void {
     this.state.phase = 'racing';
-    this.raceStartTime = Date.now();
-    this.lapStartTime = Date.now();
+    this.raceStartTime = performance.now();
+    this.lapStartTime = performance.now();
   }
 
   public isFinished(): boolean {

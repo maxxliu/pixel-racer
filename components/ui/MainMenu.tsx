@@ -69,7 +69,7 @@ export default function MainMenu({ onStartGame, onSettings }: MainMenuProps) {
           Multiplayer
         </Link>
 
-        <button onClick={onSettings} className="btn btn-secondary">
+        <button onClick={() => onSettings?.()} className="btn btn-secondary">
           Settings
         </button>
 

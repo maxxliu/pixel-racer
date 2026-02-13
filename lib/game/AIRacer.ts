@@ -29,9 +29,10 @@ export class AIRacer {
   private carSpeed: number = 0;
   private carRotation: number;
   private lap: number = 1;
-  private lastZ: number = 0;
+  private lastForwardDist: number = 5; // Forward distance from finish line (same as player)
   private crossedFinishLine: boolean = false;
   private wheelMeshes: THREE.Mesh[] = [];
+  private startPosition: { x: number; z: number; rotation: number };
 
   private readonly maxSpeed: number;
   private readonly acceleration = 18;
@@ -46,10 +47,13 @@ export class AIRacer {
     startPos: { x: number; z: number; rotation: number },
     personality: AIPersonality,
     colorIndex: number,
-    carMaterial: CANNON.Material
+    carMaterial: CANNON.Material,
+    trackStartPosition?: { x: number; z: number; rotation: number }
   ) {
     this.personality = personality;
     this.carRotation = startPos.rotation;
+    // Use the track's actual start/finish position for lap detection (not the AI's staggered start)
+    this.startPosition = trackStartPosition || startPos;
 
     // Set max speed based on personality
     switch (personality) {
@@ -94,7 +98,6 @@ export class AIRacer {
     this.mesh.rotation.y = startPos.rotation;
     scene.add(this.mesh);
 
-    this.lastZ = startPos.z;
   }
 
   private createCarMesh(color: number): THREE.Group {
@@ -228,19 +231,31 @@ export class AIRacer {
   }
 
   private trackLap(): void {
-    const currentZ = this.body.position.z;
     const currentX = this.body.position.x;
+    const currentZ = this.body.position.z;
 
-    // Check if near finish line (at z=-10, x=0)
-    if (Math.abs(currentX) < 10) {
-      if (this.lastZ < -10 && currentZ >= -10 && !this.crossedFinishLine) {
+    // Use the same projection-based finish line detection as the player (Game.ts)
+    const startX = this.startPosition.x;
+    const startZ = this.startPosition.z;
+    const trackDir = this.startPosition.rotation;
+
+    const dx = currentX - startX;
+    const dz = currentZ - startZ;
+
+    // Forward distance from finish line (positive = past the line)
+    const forwardDist = dx * Math.sin(trackDir) + dz * Math.cos(trackDir);
+    // Lateral distance from finish line center
+    const lateralDist = Math.abs(dx * Math.cos(trackDir) - dz * Math.sin(trackDir));
+
+    if (lateralDist < 10) {
+      if (this.lastForwardDist < 0 && forwardDist >= 0 && !this.crossedFinishLine) {
         this.crossedFinishLine = true;
         this.lap++;
-      } else if (currentZ < -30) {
+      } else if (forwardDist < -10) {
         this.crossedFinishLine = false;
       }
     }
-    this.lastZ = currentZ;
+    this.lastForwardDist = forwardDist;
   }
 
   public getState(): AIRacerState {
@@ -292,13 +307,24 @@ export class AIRacer {
     this.carRotation = startPos.rotation;
     this.lap = 1;
     this.crossedFinishLine = false;
-    this.lastZ = startPos.z;
+    this.lastForwardDist = 5; // Positive value so AI must complete a full lap first
 
     this.mesh.position.copy(this.body.position as unknown as THREE.Vector3);
     this.mesh.quaternion.copy(this.body.quaternion as unknown as THREE.Quaternion);
   }
 
   public dispose(scene: THREE.Scene, world: CANNON.World): void {
+    // Dispose geometries and materials to prevent GPU memory leak
+    this.mesh.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        if (Array.isArray(child.material)) {
+          child.material.forEach((m) => m.dispose());
+        } else if (child.material) {
+          child.material.dispose();
+        }
+      }
+    });
     scene.remove(this.mesh);
     world.removeBody(this.body);
   }

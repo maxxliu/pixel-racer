@@ -66,9 +66,9 @@ export function deserializeTrack(track: Track): SerializedTrack {
     waypoints: track.waypoints,
     startPosition: track.start_position,
     thumbnailSvg: track.thumbnail_svg || undefined,
-    trackLengthM: track.track_length_m || undefined,
-    difficulty: track.difficulty || undefined,
-    turnCount: track.turn_count || undefined
+    trackLengthM: track.track_length_m ?? undefined,
+    difficulty: track.difficulty ?? undefined,
+    turnCount: track.turn_count ?? undefined
   };
 }
 
@@ -118,7 +118,9 @@ export function calculateStartPosition(waypoints: TrackWaypoint[]): { x: number;
   }
 
   // Find first checkpoint or use first waypoint
-  const startIndex = waypoints.findIndex(wp => wp.isCheckpoint) || 0;
+  // Note: findIndex returns -1 when not found, and -1 is truthy in JS, so use explicit check
+  const foundIndex = waypoints.findIndex(wp => wp.isCheckpoint);
+  const startIndex = foundIndex >= 0 ? foundIndex : 0;
   const startWp = waypoints[startIndex];
   const nextWp = waypoints[(startIndex + 1) % waypoints.length];
 

@@ -69,10 +69,7 @@ export class VehiclePhysics {
     // Add wheels
     this.addWheels();
 
-    // Add chassis body to world first
-    world.addBody(this.body);
-
-    // Add vehicle (wheels and constraints) to world
+    // Add vehicle to world (addToWorld internally adds the chassis body)
     this.vehicle.addToWorld(world);
   }
 
@@ -205,7 +202,8 @@ export class VehiclePhysics {
     }
 
     const gearRatio = this.gearRatios[this.currentGear] || 1;
-    const wheelRPM = (speed / (2 * Math.PI * this.config.wheel.radius)) * 60;
+    const speedMS = speed / 3.6; // Convert km/h back to m/s for RPM calculation
+    const wheelRPM = (speedMS / (2 * Math.PI * this.config.wheel.radius)) * 60;
     const targetRPM = wheelRPM * gearRatio * this.finalDrive;
 
     // Smooth RPM transition
@@ -247,7 +245,7 @@ export class VehiclePhysics {
       rotation: wheel.rotation,
       suspensionLength: wheel.suspensionLength,
       isInContact: wheel.isInContact,
-      contactPoint: wheel.raycastResult.hitPointWorld
+      contactPoint: wheel.isInContact
         ? {
             x: wheel.raycastResult.hitPointWorld.x,
             y: wheel.raycastResult.hitPointWorld.y,

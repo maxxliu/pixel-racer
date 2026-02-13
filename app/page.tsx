@@ -539,7 +539,7 @@ function RacingBackground({ isDarkMode }: { isDarkMode: boolean }) {
       const backWallColor = isDarkMode ? '#252535' : '#3a4a5a';
       const tierTopColors = isDarkMode
         ? ['#3a3a4a', '#454555', '#505060', '#5a5a6a', '#656575']
-        : ['#7080900', '#8090a0', '#90a0b0', '#a0b0c0', '#b0c0d0'];
+        : ['#708090', '#8090a0', '#90a0b0', '#a0b0c0', '#b0c0d0'];
       const tierFrontColor = isDarkMode ? '#3a3a4a' : '#607080';
       const crowdColors = ['#ef4444', '#3b82f6', '#fbbf24', '#22c55e', '#f97316', '#a855f7', '#ec4899', '#14b8a6'];
 
