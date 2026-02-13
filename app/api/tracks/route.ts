@@ -11,7 +11,6 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = supabase as any;
     const { searchParams } = new URL(request.url);
     const difficulty = searchParams.get('difficulty');
@@ -72,7 +71,6 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = supabase as any;
     const body = await request.json();
 

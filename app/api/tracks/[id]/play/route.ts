@@ -20,7 +20,6 @@ export async function POST(
   try {
     const { id } = await context.params;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = supabase as any;
 
     // Use RPC function to increment play count

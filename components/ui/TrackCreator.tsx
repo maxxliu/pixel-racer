@@ -180,7 +180,6 @@ export default function TrackCreator() {
         startPosition
       );
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data, error } = await (supabase as any)
         .from('tracks')
         .insert(trackInsert)
@@ -350,7 +349,7 @@ export default function TrackCreator() {
 
               {!validation && rawPoints.length > 0 && (
                 <p className="text-pixel-gray font-pixel-body">
-                  Click "Process Track" to validate
+                  Click &quot;Process Track&quot; to validate
                 </p>
               )}
 
