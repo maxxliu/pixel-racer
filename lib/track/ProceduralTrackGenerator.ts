@@ -181,7 +181,10 @@ function generateBasePoints(count: number, worldSize: number): Point2D[] {
       points.some(p => distance(p, point) < minDistance)
     );
 
-    points.push(point);
+    // Only add the point if it satisfies the minimum distance requirement
+    if (!points.some(p => distance(p, point) < minDistance)) {
+      points.push(point);
+    }
   }
 
   return points;
@@ -211,10 +214,19 @@ function insertCornerTemplates(
   const insertPositions: number[] = [];
   for (let i = 0; i < numCorners && i < points.length - 1; i++) {
     let pos: number;
+    let attempts = 0;
+    const maxAttempts = 100;
     do {
       pos = 1 + Math.floor(Math.random() * (points.length - 2));
-    } while (insertPositions.includes(pos) || insertPositions.includes(pos - 1) || insertPositions.includes(pos + 1));
-    insertPositions.push(pos);
+      attempts++;
+    } while (
+      attempts < maxAttempts &&
+      (insertPositions.includes(pos) || insertPositions.includes(pos - 1) || insertPositions.includes(pos + 1))
+    );
+    // Only add if we found a valid non-adjacent position
+    if (attempts < maxAttempts) {
+      insertPositions.push(pos);
+    }
   }
 
   insertPositions.sort((a, b) => b - a); // Insert from end to preserve indices

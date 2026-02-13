@@ -52,6 +52,10 @@ export class GameLoop {
 
   public pause(): void {
     this.isRunning = false;
+    if (this.animationFrameId !== null) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
   }
 
   public resume(): void {

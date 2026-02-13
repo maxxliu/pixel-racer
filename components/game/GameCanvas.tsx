@@ -78,7 +78,7 @@ export default function GameCanvas({ gameMode = 'time-trial', customTrack = fals
       }
       setTimeout(() => setIsLoading(false), 500);
     }
-  }, []);
+  }, [customTrack]);
 
   const handleGameStateUpdate = useCallback((state: typeof gameState) => {
     setGameState(state);
@@ -112,6 +112,8 @@ export default function GameCanvas({ gameMode = 'time-trial', customTrack = fals
   const handlePlayAgain = useCallback(() => {
     setRaceResults(null);
     setMinimapData(null);
+    setIsLoading(true);
+    setLoadingProgress(0);
     // Dispose old game and create new one
     gameRef.current?.dispose();
 
@@ -128,6 +130,28 @@ export default function GameCanvas({ gameMode = 'time-trial', customTrack = fals
       game.init();
     }
   }, [gameMode, customTrackData, handleProgressUpdate, handleGameStateUpdate, handlePause, handleRaceComplete]);
+
+  // Refs for pause keyboard handler to avoid stale closures
+  const isPausedRef = useRef(isPaused);
+  isPausedRef.current = isPaused;
+  const raceResultsRef = useRef(raceResults);
+  raceResultsRef.current = raceResults;
+
+  // Separate effect for keyboard pause handler to avoid re-initializing the game
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !raceResultsRef.current) {
+        if (isPausedRef.current) {
+          handleResume();
+        } else {
+          handlePause();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handlePause, handleResume]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -147,24 +171,10 @@ export default function GameCanvas({ gameMode = 'time-trial', customTrack = fals
     gameRef.current = game;
     game.init();
 
-    // Handle keyboard for pause
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !raceResults) {
-        if (isPaused) {
-          handleResume();
-        } else {
-          handlePause();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
       game.dispose();
     };
-  }, [gameMode, customTrack, customTrackData, handleProgressUpdate, handleGameStateUpdate, handlePause, handleRaceComplete, isPaused, handleResume, raceResults]);
+  }, [gameMode, customTrack, customTrackData, handleProgressUpdate, handleGameStateUpdate, handlePause, handleRaceComplete]);
 
   // Click handler to ensure focus - but only when actively playing
   const handleClick = useCallback((e: React.MouseEvent) => {

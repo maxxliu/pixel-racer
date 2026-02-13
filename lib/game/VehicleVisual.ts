@@ -5,7 +5,7 @@ export class VehicleVisual {
   private scene: THREE.Scene;
   private chassisGroup: THREE.Group;
   private wheels: THREE.Mesh[] = [];
-  private wheelRadius = 0.35;
+  private wheelRadius = 0.4; // Must match VehicleConfig.wheel.radius
 
   constructor(scene: THREE.Scene, color: number = 0xff6600) {
     this.scene = scene;

@@ -709,23 +709,28 @@ export class TrackBuilder {
     const start = this.trackData.startPosition;
     const width = this.trackData.waypoints[0].width;
 
-    // Main line
+    // Main line - apply start rotation so it's perpendicular to track direction
     const lineGeo = new THREE.PlaneGeometry(width, 3);
     const lineMat = new THREE.MeshBasicMaterial({ color: PIXEL_COLORS.white });
     const line = new THREE.Mesh(lineGeo, lineMat);
     line.rotation.x = -Math.PI / 2;
+    line.rotation.z = -start.rotation; // Rotate to match track direction
     line.position.set(start.x, 0.03, start.z);
     this.scene.add(line);
 
-    // Checkered pattern
+    // Checkered pattern - use a group to handle rotation
+    const checkerGroup = new THREE.Group();
     const checkerGeo = new THREE.PlaneGeometry(width / 10, 3);
     const checkerMat = new THREE.MeshBasicMaterial({ color: PIXEL_COLORS.black });
     for (let i = 0; i < 10; i += 2) {
       const checker = new THREE.Mesh(checkerGeo, checkerMat);
       checker.rotation.x = -Math.PI / 2;
-      checker.position.set(start.x - width / 2 + (i + 0.5) * (width / 10), 0.04, start.z);
-      this.scene.add(checker);
+      checker.position.set(-width / 2 + (i + 0.5) * (width / 10), 0.04, 0);
+      checkerGroup.add(checker);
     }
+    checkerGroup.position.set(start.x, 0, start.z);
+    checkerGroup.rotation.y = start.rotation;
+    this.scene.add(checkerGroup);
   }
 
   public getMinimapData(): MinimapData {
@@ -820,13 +825,19 @@ export class TrackBuilder {
   public getAIStartPositions(count: number): { x: number; z: number; rotation: number }[] {
     const positions: { x: number; z: number; rotation: number }[] = [];
     const start = this.trackData.startPosition;
+    const cos = Math.cos(start.rotation);
+    const sin = Math.sin(start.rotation);
 
     for (let i = 0; i < count; i++) {
       const row = Math.floor(i / 2);
       const col = i % 2;
+      // Offsets in local space (lateral and behind the start)
+      const localX = col === 0 ? -3 : 3;
+      const localZ = -(row + 1) * 8;
+      // Rotate offsets by start rotation to handle custom tracks
       positions.push({
-        x: start.x + (col === 0 ? -3 : 3),
-        z: start.z - (row + 1) * 8,
+        x: start.x + localX * cos - localZ * sin,
+        z: start.z + localX * sin + localZ * cos,
         rotation: start.rotation,
       });
     }

@@ -16,6 +16,8 @@ export class InputManager {
   private gamepadIndex: number | null = null;
   private currentInput: InputState;
   private inputSource: InputSource = 'keyboard';
+  // Track previous gamepad button states for edge detection (one-shot triggers)
+  private prevGamepadButtons: boolean[] = [];
 
   // Keyboard bindings
   private readonly keyBindings = {
@@ -172,20 +174,25 @@ export class InputManager {
     // A button (index 0) for handbrake
     this.currentInput.handbrake = gamepad.buttons[0]?.pressed || false;
 
+    // One-shot buttons: only trigger on rising edge (not-pressed -> pressed)
+    const currentButtons = Array.from({ length: gamepad.buttons.length }, (_, i) => gamepad.buttons[i]?.pressed || false);
+
     // Start button (index 9) for pause
-    if (gamepad.buttons[9]?.pressed) {
+    if (currentButtons[9] && !this.prevGamepadButtons[9]) {
       this.currentInput.pause = true;
     }
 
     // Y button (index 3) for camera toggle
-    if (gamepad.buttons[3]?.pressed) {
+    if (currentButtons[3] && !this.prevGamepadButtons[3]) {
       this.currentInput.cameraToggle = true;
     }
 
     // B button (index 1) for reset
-    if (gamepad.buttons[1]?.pressed) {
+    if (currentButtons[1] && !this.prevGamepadButtons[1]) {
       this.currentInput.resetVehicle = true;
     }
+
+    this.prevGamepadButtons = currentButtons;
   }
 
   public getInputSource(): InputSource {

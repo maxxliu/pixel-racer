@@ -130,7 +130,8 @@ export async function POST(
 
     let rank = 1;
     if (!rankError && rankings) {
-      rank = (rankings as { id: string }[]).findIndex(r => r.id === data?.id) + 1;
+      const foundIndex = (rankings as { id: string }[]).findIndex(r => r.id === data?.id);
+      rank = foundIndex >= 0 ? foundIndex + 1 : 1;
     }
 
     return NextResponse.json({

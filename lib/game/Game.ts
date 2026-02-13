@@ -428,7 +428,8 @@ export class Game {
         aiStartPositions[i],
         personalities[i],
         i,
-        this.carMaterial
+        this.carMaterial,
+        this.startPosition // Pass actual track start position for lap detection
       );
       this.aiRacers.push(racer);
     }
@@ -723,9 +724,15 @@ export class Game {
       gear = 5;
     }
 
+    // Calculate RPM based on speed and gear
+    const gearRatios = [0, 3.5, 2.5, 1.8, 1.3, 1.0];
+    const gearRatio = gear > 0 ? (gearRatios[gear] || 1.0) : 1.0;
+    const rpm = Math.round(Math.min(8000, 800 + (speedKmh * gearRatio * 30)));
+
     this.gameState = {
       ...this.gameState,
       speed: Math.round(speedKmh),
+      rpm,
       gear,
       lap: this.currentLap,
       position: this.racePosition,
@@ -753,8 +760,8 @@ export class Game {
       this.carBody.quaternion.w
     );
 
-    // Animate wheels based on speed
-    const wheelRotation = this.carSpeed * 0.1;
+    // Animate wheels based on speed (frame-rate independent using fixed timestep)
+    const wheelRotation = this.carSpeed * this.gameLoop.getFixedTimeStep() * 5;
     this.wheelMeshes.forEach((wheel) => {
       wheel.rotation.x += wheelRotation;
     });
@@ -786,6 +793,9 @@ export class Game {
     this.carSpeed = 0;
     this.carRotation = this.startPosition.rotation;
     this.lapStartTime = performance.now();
+    // Reset finish line crossing state to prevent false lap triggers
+    this.lastZ = 5;
+    this.crossedFinishLine = false;
   }
 
   public pause(): void {
@@ -837,6 +847,21 @@ export class Game {
       racer.dispose(this.engine.scene, this.world);
     }
     this.aiRacers = [];
+
+    // Dispose player car geometries and materials to prevent GPU memory leak
+    if (this.carMesh) {
+      this.carMesh.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          if (Array.isArray(child.material)) {
+            child.material.forEach((m) => m.dispose());
+          } else if (child.material) {
+            child.material.dispose();
+          }
+        }
+      });
+      this.engine?.scene?.remove(this.carMesh);
+    }
 
     this.engine?.dispose();
   }

@@ -24,6 +24,7 @@ export async function GET(
       .from('tracks')
       .select('*')
       .eq('id', id)
+      .eq('is_public', true)
       .single();
 
     if (error) {
