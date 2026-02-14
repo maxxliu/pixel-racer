@@ -23,6 +23,7 @@ interface HUDProps {
   carZ?: number;
   carRotation?: number;
   minimapData?: MinimapData;
+  isMobile?: boolean;
 }
 
 function HUD({
@@ -39,6 +40,7 @@ function HUD({
   carZ = 0,
   carRotation = 0,
   minimapData,
+  isMobile = false,
 }: HUDProps) {
   const formatTime = (ms: number): string => {
     if (ms === 0) return '--:--.---';
@@ -153,7 +155,11 @@ function HUD({
       </div>
 
       {/* Bottom - Speedometer and Gear */}
-      <div className="absolute bottom-4 right-4 flex items-end gap-3">
+      <div className={`absolute bottom-4 flex items-end gap-3 ${
+        isMobile
+          ? 'left-1/2 -translate-x-1/2 bottom-2'
+          : 'right-4'
+      }`}>
         {/* Gear Display */}
         <div className="pixel-panel text-center min-w-[60px]">
           <div className="text-[8px] text-pixel-gray uppercase mb-1">GEAR</div>

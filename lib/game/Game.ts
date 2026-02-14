@@ -10,6 +10,7 @@ import { SkidMarkManager } from './SkidMarkManager';
 import { AIRacer } from './AIRacer';
 import { VehicleState } from '@/lib/shared/physics/VehiclePhysics';
 import { AIPersonality } from '@/lib/shared/game/AIController';
+import { HapticFeedback } from '@/lib/input/HapticFeedback';
 
 export type GameMode = 'time-trial' | 'race';
 
@@ -288,6 +289,7 @@ export class Game {
       ) {
         // Reduce speed on barrier collision
         this.carSpeed *= 0.7;
+        HapticFeedback.collision();
       }
     });
   }
@@ -628,6 +630,7 @@ export class Game {
         } else {
           this.currentLap++;
           this.lapStartTime = performance.now();
+          HapticFeedback.checkpoint();
         }
       } else if (forwardDist < -10) {
         // Reset flag when car is well behind the line
@@ -685,6 +688,7 @@ export class Game {
 
   private completeRace(): void {
     this.raceComplete = true;
+    HapticFeedback.raceComplete();
     const totalTime = performance.now() - this.raceStartTime;
 
     this.carSpeed = 0;
@@ -886,5 +890,9 @@ export class Game {
 
   public getCustomTrackId(): string | undefined {
     return this.options.customTrack?.id;
+  }
+
+  public getInputManager(): InputManager | null {
+    return this.inputManager ?? null;
   }
 }
