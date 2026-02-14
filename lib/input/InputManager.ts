@@ -9,7 +9,7 @@ export interface InputState {
   resetVehicle: boolean;
 }
 
-export type InputSource = 'keyboard' | 'gamepad';
+export type InputSource = 'keyboard' | 'gamepad' | 'touch';
 
 export class InputManager {
   private keyState: Map<string, boolean> = new Map();
@@ -18,6 +18,25 @@ export class InputManager {
   private inputSource: InputSource = 'keyboard';
   // Track previous gamepad button states for edge detection (one-shot triggers)
   private prevGamepadButtons: boolean[] = [];
+
+  // Touch input state (written by external TouchInputHandler via setTouchState)
+  private touchState: {
+    active: boolean;
+    steering: number;
+    throttle: number;
+    brake: boolean;
+    handbrake: boolean;
+    pause: boolean;
+    resetVehicle: boolean;
+  } = {
+    active: false,
+    steering: 0,
+    throttle: 0,
+    brake: false,
+    handbrake: false,
+    pause: false,
+    resetVehicle: false,
+  };
 
   // Keyboard bindings
   private readonly keyBindings = {
@@ -98,13 +117,35 @@ export class InputManager {
     return keys.some((key) => this.keyState.get(key));
   }
 
+  /**
+   * Set touch input state from external TouchInputHandler.
+   * Called by the MobileControls component each frame.
+   */
+  public setTouchState(state: {
+    active: boolean;
+    steering: number;
+    throttle: number;
+    brake: boolean;
+    handbrake: boolean;
+    pause: boolean;
+    resetVehicle: boolean;
+  }): void {
+    this.touchState = state;
+  }
+
   public update(): InputState {
     // Reset one-shot inputs
     this.currentInput.pause = false;
     this.currentInput.cameraToggle = false;
     this.currentInput.resetVehicle = false;
 
-    // Check for gamepad input first
+    // Touch input takes priority when active (user is touching the screen)
+    if (this.touchState.active || this.touchState.pause || this.touchState.resetVehicle) {
+      this.updateFromTouch();
+      return { ...this.currentInput };
+    }
+
+    // Check for gamepad input next
     if (this.gamepadIndex !== null) {
       const gamepad = navigator.getGamepads()[this.gamepadIndex];
       if (gamepad) {
@@ -195,12 +236,31 @@ export class InputManager {
     this.prevGamepadButtons = currentButtons;
   }
 
+  private updateFromTouch(): void {
+    this.inputSource = 'touch';
+    this.currentInput.steering = this.touchState.steering;
+    this.currentInput.throttle = this.touchState.throttle;
+    this.currentInput.brake = this.touchState.brake;
+    this.currentInput.handbrake = this.touchState.handbrake;
+
+    if (this.touchState.pause) {
+      this.currentInput.pause = true;
+    }
+    if (this.touchState.resetVehicle) {
+      this.currentInput.resetVehicle = true;
+    }
+  }
+
   public getInputSource(): InputSource {
     return this.inputSource;
   }
 
   public isGamepadConnected(): boolean {
     return this.gamepadIndex !== null;
+  }
+
+  public isTouchActive(): boolean {
+    return this.touchState.active;
   }
 
   public dispose(): void {

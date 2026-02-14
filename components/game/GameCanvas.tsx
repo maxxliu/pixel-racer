@@ -5,7 +5,10 @@ import LoadingScreen from './LoadingScreen';
 import HUD from './HUD';
 import PauseMenu from './PauseMenu';
 import RaceComplete from './RaceComplete';
+import MobileControls from './MobileControls';
 import { Game, RaceResults, GameMode, MinimapData, CustomTrackData } from '@/lib/game/Game';
+import { TouchInputHandler } from '@/lib/input/TouchInputHandler';
+import type { InputManager } from '@/lib/input/InputManager';
 
 interface GameCanvasProps {
   gameMode?: GameMode;
@@ -24,6 +27,8 @@ export default function GameCanvas({ gameMode = 'time-trial', customTrack = fals
   // Track ID - only set for custom tracks from the database
   const [trackId, setTrackId] = useState<string | undefined>(undefined);
   const [customTrackData, setCustomTrackData] = useState<CustomTrackData | undefined>(undefined);
+  const [isMobile, setIsMobile] = useState(false);
+  const [inputManager, setInputManager] = useState<InputManager | null>(null);
   const [gameState, setGameState] = useState({
     speed: 0,
     rpm: 0,
@@ -38,6 +43,11 @@ export default function GameCanvas({ gameMode = 'time-trial', customTrack = fals
     carZ: 0,
     carRotation: 0,
   });
+
+  // Detect touch device on mount
+  useEffect(() => {
+    setIsMobile(TouchInputHandler.isTouchDevice());
+  }, []);
 
   // Load custom track data from sessionStorage
   useEffect(() => {
@@ -75,6 +85,11 @@ export default function GameCanvas({ gameMode = 'time-trial', customTrack = fals
       const tid = gameRef.current?.getCustomTrackId();
       if (tid && customTrack) {
         setTrackId(tid);
+      }
+      // Grab the inputManager for mobile controls
+      const im = gameRef.current?.getInputManager();
+      if (im) {
+        setInputManager(im);
       }
       setTimeout(() => setIsLoading(false), 500);
     }
@@ -208,7 +223,19 @@ export default function GameCanvas({ gameMode = 'time-trial', customTrack = fals
         <LoadingScreen progress={loadingProgress} message={loadingMessage} />
       )}
 
-      {!isLoading && !isPaused && !raceResults && <HUD {...gameState} minimapData={minimapData || undefined} />}
+      {!isLoading && !isPaused && !raceResults && (
+        <>
+          <HUD {...gameState} minimapData={minimapData || undefined} isMobile={isMobile} />
+          {isMobile && (
+            <MobileControls
+              inputManager={inputManager}
+              containerRef={containerRef}
+              isPaused={isPaused}
+              isLoading={isLoading}
+            />
+          )}
+        </>
+      )}
 
       {isPaused && !raceResults && (
         <PauseMenu
