@@ -149,7 +149,7 @@ export default function TrackDetailPage({ params }: TrackDetailPageProps) {
                 </div>
                 <div>
                   <span className="text-pixel-gray font-pixel-body text-sm block">Turns</span>
-                  <span className="text-white font-pixel text-lg">{track.turn_count || '?'}</span>
+                  <span className="text-white font-pixel text-lg">{track.turn_count ?? '?'}</span>
                 </div>
                 <div>
                   <span className="text-pixel-gray font-pixel-body text-sm block">Difficulty</span>

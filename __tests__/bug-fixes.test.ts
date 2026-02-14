@@ -487,3 +487,146 @@ describe('MainMenu', () => {
     expect(source).not.toMatch(/onClick=\{onSettings\}/);
   });
 });
+
+// ============================================================
+// HUD minimap car rotation fix
+// ============================================================
+describe('HUD', () => {
+  describe('minimap car indicator rotation should include 180° offset', () => {
+    // Bug: The SVG car arrow shape points upward (-Y in SVG = -Z in game world)
+    // by default, but when carRotation=0 the car faces +Z direction.
+    // Without the +180 offset, the arrow points backwards on the minimap.
+
+    test('source code should add 180 to car rotation in minimap transform', () => {
+      const fs = require('fs');
+      const source = fs.readFileSync(
+        require('path').join(__dirname, '..', 'components', 'game', 'HUD.tsx'),
+        'utf8'
+      );
+      // Should contain the +180 offset in the rotate transform
+      expect(source).toContain('/ Math.PI + 180');
+      // Should NOT have the old rotation without offset
+      expect(source).not.toContain('(carRotation) * 180 / Math.PI}');
+    });
+  });
+});
+
+// ============================================================
+// Nullish coalescing fixes for Supabase/leaderboard integration
+// ============================================================
+describe('Supabase integration - nullish coalescing fixes', () => {
+  describe('tracks POST API should use ?? for numeric fields', () => {
+    // Bug: `body.track_length_m || null` and `body.turn_count || null` treat 0 as falsy,
+    // causing valid 0 values to be stored as null in the database.
+
+    test('tracks API POST should use ?? instead of || for track_length_m and turn_count', () => {
+      const fs = require('fs');
+      const source = fs.readFileSync(
+        require('path').join(__dirname, '..', 'app', 'api', 'tracks', 'route.ts'),
+        'utf8'
+      );
+      expect(source).toContain('track_length_m: body.track_length_m ?? null');
+      expect(source).toContain('turn_count: body.turn_count ?? null');
+      expect(source).toContain('difficulty: body.difficulty ?? null');
+      // Should NOT use || for these fields
+      expect(source).not.toContain('body.track_length_m || null');
+      expect(source).not.toContain('body.turn_count || null');
+    });
+  });
+
+  describe('play count increment should use ?? for play_count', () => {
+    // Bug: `play_count || 0` treats a play_count of 0 as falsy, keeping it at 0
+    // instead of incrementing to 1.
+
+    test('play endpoint should use ?? instead of || for play_count', () => {
+      const fs = require('fs');
+      const source = fs.readFileSync(
+        require('path').join(__dirname, '..', 'app', 'api', 'tracks', '[id]', 'play', 'route.ts'),
+        'utf8'
+      );
+      expect(source).toContain('play_count ?? 0');
+      expect(source).not.toContain('play_count || 0');
+    });
+  });
+
+  describe('global leaderboard should use ?? for track_length_m', () => {
+    // Bug: `entry.tracks?.track_length_m || null` treats 0 as falsy.
+
+    test('global leaderboard API should use ?? instead of || for track_length_m', () => {
+      const fs = require('fs');
+      const source = fs.readFileSync(
+        require('path').join(__dirname, '..', 'app', 'api', 'leaderboard', 'global', 'route.ts'),
+        'utf8'
+      );
+      expect(source).toContain('track_length_m ?? null');
+      expect(source).not.toContain('track_length_m || null');
+    });
+  });
+
+  describe('TrackCard should use ?? for turn_count display', () => {
+    // Bug: `track.turn_count || '?'` shows '?' for tracks with 0 turns.
+
+    test('TrackCard should use ?? instead of || for turn_count', () => {
+      const fs = require('fs');
+      const source = fs.readFileSync(
+        require('path').join(__dirname, '..', 'components', 'tracks', 'TrackCard.tsx'),
+        'utf8'
+      );
+      expect(source).toContain("turn_count ?? '?'");
+      expect(source).not.toContain("turn_count || '?'");
+    });
+  });
+
+  describe('Track detail page should use ?? for turn_count display', () => {
+    // Bug: `track.turn_count || '?'` shows '?' for tracks with 0 turns.
+
+    test('track detail page should use ?? instead of || for turn_count', () => {
+      const fs = require('fs');
+      const source = fs.readFileSync(
+        require('path').join(__dirname, '..', 'app', 'tracks', '[id]', 'page.tsx'),
+        'utf8'
+      );
+      expect(source).toContain("turn_count ?? '?'");
+      expect(source).not.toContain("turn_count || '?'");
+    });
+  });
+
+  describe('RaceComplete normalization should use ?? for field mapping', () => {
+    // Bug: `entry.player_name || entry.playerName` fails when player_name is empty string.
+    // `entry.time_ms || entry.timeMs` would fail for time_ms of 0.
+
+    test('RaceComplete should use ?? for leaderboard field normalization', () => {
+      const fs = require('fs');
+      const source = fs.readFileSync(
+        require('path').join(__dirname, '..', 'components', 'game', 'RaceComplete.tsx'),
+        'utf8'
+      );
+      expect(source).toContain('entry.player_name ?? entry.playerName');
+      expect(source).toContain('entry.time_ms ?? entry.timeMs');
+      expect(source).toContain('entry.created_at ?? entry.createdAt');
+      // Should NOT use || for normalization
+      expect(source).not.toContain('entry.player_name || entry.playerName');
+      expect(source).not.toContain('entry.time_ms || entry.timeMs');
+    });
+  });
+});
+
+// ============================================================
+// Game.ts dispose should remove physics body
+// ============================================================
+describe('Game dispose', () => {
+  describe('player car body should be removed from physics world', () => {
+    // Bug: Game.dispose() cleaned up AI racer bodies and GPU resources,
+    // but never removed the player's carBody from the CANNON.js physics world.
+
+    test('source code should remove carBody from world in dispose()', () => {
+      const fs = require('fs');
+      const source = fs.readFileSync(
+        require('path').join(__dirname, '..', 'lib', 'game', 'Game.ts'),
+        'utf8'
+      );
+      const disposeMethod = source.slice(source.indexOf('public dispose'));
+      expect(disposeMethod).toContain('this.world.removeBody(this.carBody)');
+    });
+  });
+});
