@@ -32,7 +32,7 @@ function toGeometry(s: Strip): THREE.BufferGeometry {
   return g;
 }
 
-function makeAsphaltTexture(): THREE.CanvasTexture {
+export function makeAsphaltTexture(): THREE.CanvasTexture {
   const size = 256;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
