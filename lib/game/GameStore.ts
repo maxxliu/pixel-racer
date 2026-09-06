@@ -47,6 +47,18 @@ export interface HudState {
   notices: Notice[];
   fps: number;
   showDriftHint: boolean;
+  // --- endless mode ---
+  score: number;
+  distance: number;
+  multiplier: number;
+  combo: number;
+  /** Metres between the rival's nose and the player. */
+  gap: number;
+  /** 0 = rival far away, 1 = on your door. */
+  danger: number;
+  bestScore: number;
+  runTime: number;
+  caught: boolean;
 }
 
 export function createHudState(totalLaps: number, totalRacers: number): HudState {
@@ -58,6 +70,7 @@ export function createHudState(totalLaps: number, totalRacers: number): HudState
     driftCharge: 0, driftTier: 0, isDrifting: false, boostTime: 0, boostTier: 0,
     wrongWay: false, offTrack: false, stuck: false,
     dots: [], notices: [], fps: 60, showDriftHint: false,
+    score: 0, distance: 0, multiplier: 1, combo: 0, gap: 60, danger: 0, bestScore: 0, runTime: 0, caught: false,
   };
 }
 

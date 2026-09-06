@@ -19,7 +19,7 @@ export interface CustomTrackData {
   name?: string;
 }
 
-export type GameMode = 'time-trial' | 'race';
+export type GameMode = 'time-trial' | 'race' | 'endless';
 
 export interface Vec2 {
   x: number;

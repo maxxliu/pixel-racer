@@ -13,6 +13,7 @@ import { BUILTIN_TRACK_ID } from '@/lib/tracks';
 const RacingBackground = dynamic(() => import('@/components/home/RacingBackground'), { ssr: false });
 
 const MODES = [
+  { href: '/play?mode=endless', title: 'Endless Chase', blurb: 'An endless road and a rival on your tail. Dodge everything, touch nothing.', accent: 'from-coral to-[#b38cff]', hint: 'Survive' },
   { href: '/play?mode=time-trial', title: 'Time Trial', blurb: 'Just you, the sunset, and the clock. Chase gold.', accent: 'from-sun to-coral', hint: 'Solo' },
   { href: '/play?mode=race', title: 'Race vs AI', blurb: 'Three laps against a pack that bumps back.', accent: 'from-coral to-pink', hint: 'Grid start' },
   { href: '/create-track', title: 'Create Track', blurb: 'Draw a loop or generate one. Race it in seconds.', accent: 'from-lime to-sky', hint: 'Editor' },
@@ -22,11 +23,13 @@ const MODES = [
 export default function Home() {
   const [trials, setTrials] = useState<RankedScore[]>([]);
   const [races, setRaces] = useState<RankedScore[]>([]);
+  const [runs, setRuns] = useState<RankedScore[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     setTrials(getScores({ trackId: BUILTIN_TRACK_ID, mode: 'time-trial' }).slice(0, 5));
     setRaces(getScores({ trackId: BUILTIN_TRACK_ID, mode: 'race' }).slice(0, 5));
+    setRuns(getScores({ mode: 'endless' }).slice(0, 5));
   }, []);
 
   return (
@@ -58,7 +61,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {MODES.map((m, i) => (
             <Link key={m.href} href={m.href} className="group glass relative overflow-hidden p-5 transition-transform hover:-translate-y-1 anim-slide-up" style={{ animationDelay: `${i * 60}ms` }}>
               <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${m.accent}`} />
@@ -70,7 +73,25 @@ export default function Home() {
           ))}
         </section>
 
-        <section className="mt-6 grid gap-3 md:grid-cols-2">
+        <section className="mt-6 grid gap-3 md:grid-cols-3">
+          <div className="glass p-5">
+            <div className="flex items-baseline justify-between">
+              <h2 className="text-display-m italic">Endless Chase · top runs</h2>
+              <Link href="/leaderboard" className="text-xs uppercase tracking-wider text-muted hover:text-cream">All scores</Link>
+            </div>
+            {runs.length === 0 ? (
+              <p className="mt-3 text-sm text-muted">No runs yet. Outrun the rival to set one.</p>
+            ) : (
+              <ol className="mt-3 space-y-1 text-sm">
+                {runs.map((s) => (
+                  <li key={`${s.date}-${s.score}`} className="flex justify-between gap-3">
+                    <span className="truncate"><span className="mr-2 text-muted hud-num">{s.rank}.</span>{s.playerName} <span className="text-muted">· {(s.distance ?? 0) >= 1000 ? `${((s.distance ?? 0) / 1000).toFixed(1)} km` : `${s.distance ?? 0} m`}</span></span>
+                    <span className="shrink-0 hud-num text-sun">{(s.score ?? 0).toLocaleString()}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
           <div className="glass p-5">
             <div className="flex items-baseline justify-between">
               <h2 className="text-display-m italic">Sunset Circuit · time trial</h2>
@@ -108,7 +129,7 @@ export default function Home() {
 
         <footer className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-8 text-xs text-cream/60">
           <span>© {new Date().getFullYear()} Pixel Racer</span>
-          <LinkButton href="/play?mode=time-trial" variant="primary" size="sm">Quick race</LinkButton>
+          <LinkButton href="/play?mode=endless" variant="primary" size="sm">Quick run</LinkButton>
         </footer>
       </div>
 

@@ -6,8 +6,11 @@ import LoadingScreen from './LoadingScreen';
 import HUD from './HUD';
 import PauseMenu from './PauseMenu';
 import RaceComplete from './RaceComplete';
+import RunOver from './RunOver';
 import MobileControls from './MobileControls';
 import { Game, type RaceResults, type GameMode, type MinimapData, type CustomTrackData } from '@/lib/game/Game';
+import { EndlessGame, type RunResults } from '@/lib/game/endless/EndlessGame';
+import type { GameSession } from '@/lib/game/GameSession';
 import type { GameStore } from '@/lib/game/GameStore';
 import { validateWaypoints } from '@/lib/game/TrackSpline';
 import { TouchInputHandler } from '@/lib/input/TouchInputHandler';
@@ -24,6 +27,7 @@ interface GameCanvasProps {
 }
 
 type Status = 'loading' | 'playing' | 'paused' | 'finished' | 'error';
+type AnyResults = RaceResults | RunResults;
 
 function readCustomTrack(): CustomTrackData | null {
   try {
@@ -40,11 +44,11 @@ function readCustomTrack(): CustomTrackData | null {
 export default function GameCanvas({ gameMode = 'time-trial', customTrack = false, lapsOverride }: GameCanvasProps) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
-  const gameRef = useRef<Game | null>(null);
+  const gameRef = useRef<GameSession | null>(null);
   const [settings] = useSettings();
   const [status, setStatus] = useState<Status>('loading');
   const [progress, setProgress] = useState({ value: 0, message: 'Loading' });
-  const [results, setResults] = useState<RaceResults | null>(null);
+  const [results, setResults] = useState<AnyResults | null>(null);
   const [store, setStore] = useState<GameStore | null>(null);
   const [minimap, setMinimap] = useState<MinimapData | null>(null);
   const [inputManager, setInputManager] = useState<InputManager | null>(null);
@@ -60,7 +64,7 @@ export default function GameCanvas({ gameMode = 'time-trial', customTrack = fals
     const container = containerRef.current;
     if (!container) return;
     let track: CustomTrackData | undefined;
-    if (customTrack) {
+    if (customTrack && gameMode !== 'endless') {
       const t = readCustomTrack();
       if (!t) {
         setErrorMessage('That track could not be loaded. Pick one from the library or draw a new one.');
@@ -74,18 +78,24 @@ export default function GameCanvas({ gameMode = 'time-trial', customTrack = fals
     setResults(null);
     setProgress({ value: 0, message: 'Loading' });
 
-    const game = new Game(container, {
-      mode: gameMode,
-      customTrack: track,
-      lapsOverride,
-      onProgress: (value, message) => setProgress({ value, message }),
-      onPause: () => setStatus('paused'),
-      onFinish: (r) => { setResults(r); setStatus('finished'); },
-    });
+    const game: GameSession = gameMode === 'endless'
+      ? new EndlessGame(container, {
+        onProgress: (value, message) => setProgress({ value, message }),
+        onPause: () => setStatus('paused'),
+        onFinish: (r) => { setResults(r); setStatus('finished'); },
+      })
+      : new Game(container, {
+        mode: gameMode,
+        customTrack: track,
+        lapsOverride,
+        onProgress: (value, message) => setProgress({ value, message }),
+        onPause: () => setStatus('paused'),
+        onFinish: (r) => { setResults(r); setStatus('finished'); },
+      });
     gameRef.current = game;
     setStore(game.store);
     if (process.env.NODE_ENV !== 'production') {
-      (window as unknown as { __pixelRacer?: Game }).__pixelRacer = game;
+      (window as unknown as { __pixelRacer?: GameSession }).__pixelRacer = game;
     }
     let cancelled = false;
     game.init().then(() => {
@@ -133,7 +143,7 @@ export default function GameCanvas({ gameMode = 'time-trial', customTrack = fals
 
       {status === 'error' && (
         <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 bg-ink px-6 text-center">
-          <h1 className="text-display-m italic">Can&apos;t start the race</h1>
+          <h1 className="text-display-m italic">Can&apos;t start the {gameMode === 'endless' ? 'run' : 'race'}</h1>
           <p className="max-w-md text-muted">{errorMessage}</p>
           <div className="flex gap-3">
             <LinkButton href="/tracks">Track library</LinkButton>
@@ -151,10 +161,13 @@ export default function GameCanvas({ gameMode = 'time-trial', customTrack = fals
       )}
 
       {status === 'paused' && (
-        <PauseMenu onResume={resume} onRestart={restart} onExit={exit} isMobile={isMobile} />
+        <PauseMenu onResume={resume} onRestart={restart} onExit={exit} isMobile={isMobile} restartLabel={gameMode === 'endless' ? 'New run' : 'Restart race'} />
       )}
 
-      {status === 'finished' && results && (
+      {status === 'finished' && results && results.mode === 'endless' && (
+        <RunOver results={results} onPlayAgain={restart} onMainMenu={exit} isMobile={isMobile} />
+      )}
+      {status === 'finished' && results && results.mode !== 'endless' && (
         <RaceComplete results={results} trackId={trackInfo.id} trackName={trackInfo.name} onPlayAgain={playAgain} onMainMenu={exit} />
       )}
     </div>

@@ -21,6 +21,12 @@ export class AudioEngine {
   private squealGain!: GainNode;
   private rumbleGain!: GainNode;
   private windGain!: GainNode;
+  private rivalOsc!: OscillatorNode;
+  private rivalOsc2!: OscillatorNode;
+  private rivalFilter!: BiquadFilterNode;
+  private rivalGain!: GainNode;
+  private rivalLevel = 0;
+  private heartbeatAt = 0;
   private noiseBuffer: AudioBuffer | null = null;
   private levels: AudioLevels = { muted: false, master: 0.8, engine: 0.7, sfx: 0.9 };
   private ready = false;
@@ -102,6 +108,29 @@ export class AudioEngine {
     this.rumbleGain = mkNoise('lowpass', 140, 0.8);
     this.windGain = mkNoise('highpass', 2400, 0.5);
 
+    // the rival's engine: a lower, angrier pair of saws, silent until it closes in
+    this.rivalGain = ctx.createGain();
+    this.rivalGain.gain.value = 0;
+    this.rivalGain.connect(this.sfxGain);
+    this.rivalFilter = ctx.createBiquadFilter();
+    this.rivalFilter.type = 'lowpass';
+    this.rivalFilter.frequency.value = 500;
+    this.rivalFilter.Q.value = 2.5;
+    this.rivalFilter.connect(this.rivalGain);
+    const mkRival = (detune: number) => {
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.detune.value = detune;
+      const g = ctx.createGain();
+      g.gain.value = 0.3;
+      o.connect(g);
+      g.connect(this.rivalFilter);
+      o.start();
+      return o;
+    };
+    this.rivalOsc = mkRival(0);
+    this.rivalOsc2 = mkRival(9);
+
     this.ready = true;
     this.applyLevels();
     if (ctx.state === 'suspended') void ctx.resume();
@@ -174,6 +203,60 @@ export class AudioEngine {
     src.connect(f); f.connect(g); g.connect(this.sfxGain);
     src.start();
     src.stop(ctx.currentTime + dur + 0.02);
+  }
+
+  /**
+   * Per-frame rival voice. `closeness` 0..1 (1 = on your door), `speedNorm` 0..1.
+   * Adds a heartbeat once it is close.
+   */
+  public setRival(closeness: number, speedNorm: number): void {
+    if (!this.ready) return;
+    const t = this.ctx!.currentTime;
+    const c = Math.min(1, Math.max(0, closeness));
+    this.rivalLevel = c;
+    const base = 38 + speedNorm * 150;
+    this.rivalOsc.frequency.setTargetAtTime(base, t, 0.05);
+    this.rivalOsc2.frequency.setTargetAtTime(base * 0.5, t, 0.05);
+    this.rivalFilter.frequency.setTargetAtTime(220 + c * 900, t, 0.08);
+    this.rivalGain.gain.setTargetAtTime(c * c * 0.55, t, 0.08);
+    if (c > 0.45 && t > this.heartbeatAt) {
+      this.heartbeatAt = t + 0.95 - c * 0.5;
+      this.tone(48, 0.16, 'sine', 0.3 * c);
+      setTimeout(() => this.tone(44, 0.14, 'sine', 0.22 * c), 140);
+    }
+  }
+
+  public nearMiss(): void {
+    this.tone(880, 0.09, 'triangle', 0.2);
+    setTimeout(() => this.tone(1320, 0.14, 'triangle', 0.22), 60);
+  }
+
+  public smash(): void {
+    this.noiseBurst(0.22, 1100, 0.55, 'bandpass');
+    this.tone(160, 0.14, 'square', 0.18, 90);
+  }
+
+  public comboLost(): void {
+    this.tone(190, 0.32, 'sawtooth', 0.16, 95);
+  }
+
+  public milestone(): void {
+    this.tone(659, 0.16, 'triangle', 0.22);
+    setTimeout(() => this.tone(988, 0.22, 'triangle', 0.22), 110);
+  }
+
+  public recordBeaten(): void {
+    [523, 659, 784, 1047, 1319].forEach((n, i) => setTimeout(() => this.tone(n, 0.22, 'triangle', 0.24), i * 70));
+  }
+
+  /** The rival lunges: a bark from behind. */
+  public surge(heavy: boolean): void {
+    this.tone(heavy ? 70 : 90, heavy ? 0.5 : 0.35, 'sawtooth', heavy ? 0.28 : 0.2, heavy ? 190 : 150);
+  }
+
+  public caught(): void {
+    this.noiseBurst(0.6, 500, 0.8);
+    [440, 370, 311, 262].forEach((n, i) => setTimeout(() => this.tone(n, 0.32, 'sawtooth', 0.22), i * 150));
   }
 
   public countdownBeep(final: boolean): void {

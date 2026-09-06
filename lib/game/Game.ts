@@ -17,12 +17,15 @@ import { HapticFeedback } from '@/lib/input/HapticFeedback';
 import { AudioEngine } from '@/lib/audio/AudioEngine';
 import { loadSettings, saveSettings, subscribeSettings, type GameSettings } from '@/lib/settings';
 import type { CustomTrackData, GameMode } from './types';
+import type { GameSession } from './GameSession';
 
 export type { MinimapData } from './TrackSpline';
 export type { CustomTrackData, GameMode } from './types';
 
+export type RaceMode = Exclude<GameMode, 'endless'>;
+
 export interface RaceResults {
-  mode: GameMode;
+  mode: RaceMode;
   standings: Standing[];
   position: number;
   totalTime: number;
@@ -56,7 +59,7 @@ interface RacerBundle {
   ai: AIDriver | null;
 }
 
-export class Game {
+export class Game implements GameSession {
   public readonly store: GameStore;
   public readonly audio = new AudioEngine();
   private engine!: Engine;
@@ -88,6 +91,7 @@ export class Game {
     this.settings = loadSettings();
     const isDev = process.env.NODE_ENV !== 'production';
     this.lapsTotal = isDev && options.lapsOverride ? options.lapsOverride : this.settings.laps;
+    if (options.mode === 'endless') throw new Error('Endless mode runs in EndlessGame');
     const aiCount = options.mode === 'race' ? this.settings.aiCount : 0;
     this.store = new GameStore(this.lapsTotal, aiCount + 1);
   }
@@ -239,7 +243,7 @@ export class Game {
     this.store.state.phase = 'finished';
     this.store.emit();
     const results: RaceResults = {
-      mode: this.options.mode,
+      mode: this.options.mode as RaceMode,
       standings,
       position: r.position,
       totalTime: r.finishTime,

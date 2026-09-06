@@ -15,6 +15,9 @@ const TIPS: React.ReactNode[] = [
   <>Grass is slow. Kerbs are fine. Walls hurt.</>,
   <><Kbd>C</Kbd> cycles the camera. <Kbd>R</Kbd> respawns at the last checkpoint.</>,
   <>Every checkpoint must be passed in order for a lap to count.</>,
+  <>Endless Chase: every wall scrape and every obstacle hands the rival metres. Touch nothing.</>,
+  <>Endless Chase: pass obstacles within a whisker for a Close Call and a bigger multiplier.</>,
+  <>Endless Chase: a hit resets your multiplier. Three clean patterns bring it back a tier.</>,
 ];
 
 export default function LoadingScreen({ progress = 0, message = 'Loading' }: LoadingScreenProps) {
