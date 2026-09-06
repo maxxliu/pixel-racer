@@ -116,6 +116,7 @@ export class EndlessGame implements GameSession {
 
     this.input = new InputManager();
     this.camera = new CameraRig(this.engine.camera, this.settings.cameraMode);
+    this.camera.setChaseBias(5.5, 1.2);
     this.camera.snapTo(this.director.car);
     this.audio.setLevels(this.settings.audio);
     this.unsubscribeSettings = subscribeSettings(() => {

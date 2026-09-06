@@ -21,12 +21,12 @@ export const ENDLESS_TUNING = {
   rampMin: 8,
   rampMax: 14,
   /** Distance thresholds for difficulty bands 1..4 (band 0 below the first). */
-  bandDistances: [350, 1100, 2200, 4000],
+  bandDistances: [300, 900, 1800, 3200],
 
   // --- obstacles ---
   clearLane: 4.4,
   /** Minimum gap between obstacle patterns per band. */
-  patternSpacing: [100, 85, 70, 56, 48],
+  patternSpacing: [95, 80, 66, 52, 46],
   /** Speed used for the reaction-distance floor per band: gap ≥ reactionTime·v + reactionBase. */
   expectedSpeed: [30, 36, 42, 46, 50],
   reactionTime: 0.7,
@@ -44,21 +44,21 @@ export const ENDLESS_TUNING = {
   nearMissSpeed: 20,
 
   // --- rival ---
-  // Mistake budget: with the early comfort gap of 20 m, a cone clip costs ~7 m of gap and a
-  // block or hard wall hit ~17 m (surge plus the speed you lose). Two clips leave it on your
-  // bumper; a block puts it alongside, where it commits to the pass unless you boost clear.
-  // Late in the run the comfort gap is 8 m and a single block is fatal.
-  rivalStartGap: 28,
-  pressureDistance: 4500,
+  // Mistake budget: the rival lives on your bumper. With the early comfort gap of 11 m a cone
+  // clip costs ~6 m (surge plus the speed you lose) and takes ~15 s to win back; a second clip
+  // before then is a pass. A block or hard wall hit is a pass from anywhere. Late in the run
+  // the comfort gap is 4.5 m and any touch is fatal.
+  rivalStartGap: 16,
+  pressureDistance: 3500,
   pressureMax: 1.3,
-  desiredGapStart: 20,
-  desiredGapEnd: 8,
-  desiredGapFloor: 4,
+  desiredGapStart: 11,
+  desiredGapEnd: 4.5,
+  desiredGapFloor: 2.5,
   /** The rival is never further back than this, whatever the player does. */
-  maxGap: 100,
+  maxGap: 60,
   /** Player speed low-pass (s) the rival paces itself against: short, so braking for a corner costs little but a crash does. */
   refTau: 0.6,
-  rivalTau: 0.6,
+  rivalTau: 0.45,
   rivalAccel: 22,
   paceMaxStart: 66,
   paceMaxEnd: 84,
@@ -67,25 +67,25 @@ export const ENDLESS_TUNING = {
   rivalBrake: 22,
   /** Extra corner grip while surging or committed to a pass, so a mistake in a corner still costs you. */
   surgeGrip: 2.2,
-  closeRateStart: 1.0,
-  closeRateEnd: 1.8,
-  recedeRateStart: 0.1,
-  recedeRateEnd: 0.04,
+  closeRateStart: 1.6,
+  closeRateEnd: 2.6,
+  recedeRateStart: 0.06,
+  recedeRateEnd: 0.025,
   recedeFloor: 0.7,
   /** Beyond comfort + leashExtra the closing rate doubles; beyond comfort + 50 it triples. */
-  leashExtra: 20,
+  leashExtra: 10,
   // (the rival's speed filter realises roughly two thirds of a surge)
-  surgeLight: { speed: 7, time: 1.3 },
-  surgeHeavy: { speed: 12, time: 1.8 },
+  surgeLight: { speed: 6, time: 1.3 },
+  surgeHeavy: { speed: 13, time: 1.8 },
   heavyImpact: 6,
   /** Caught when the rival's centre is this far ahead of the player's (negative = it has passed you). */
   overtakeDistance: -1.5,
   /** Under this gap the rival pulls alongside and, once there, stops receding for `commitTime`. */
-  overtakeGap: 8,
+  overtakeGap: 6,
   commitGap: 3,
   commitTime: 1.5,
   startGrace: 4,
-  closingWarnGap: 10,
+  closingWarnGap: 7,
 
   // --- scoring ---
   nearMissPoints: 100,
