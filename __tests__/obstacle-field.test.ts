@@ -123,18 +123,23 @@ describe('ObstacleField interaction', () => {
       field['place'](kind, 300, 0, 99, 0);
       const car = carAt(track, 280, 0, 40);
       const v0 = car.forwardSpeed;
-      for (let i = 0; i < 60; i++) { car.step(DT, { throttle: 1, steer: 0, brake: false, handbrake: false }); field.step(car); }
+      let minSpeed = v0;
+      let peak = v0;
+      for (let i = 0; i < 60; i++) {
+        car.step(DT, { throttle: 1, steer: 0, brake: false, handbrake: false });
+        field.step(car);
+        if (!events.some((e) => e.type === 'hit')) peak = Math.max(peak, car.speed);
+        minSpeed = Math.min(minSpeed, car.speed);
+      }
       const hits = events.filter((e) => e.type === 'hit');
       expect(hits.length).toBe(1);
-      expect(car.impacts.length + 1).toBeGreaterThan(0);
       const o = field.obstacles[0];
       expect(o.hit).toBe(true);
       expect(o.alive).toBe(kind === 'block');
-      // measured right after the hit: speed loss at least the kind's loss fraction (drag/bounce add a bit)
-      const minLoss = OBSTACLE_SPECS[kind].loss;
-      const afterHit = Math.min(...[car.speed]);
-      expect(afterHit).toBeLessThan(v0 * (1 - minLoss) + 6);
-      if (kind === 'block') expect(afterHit).toBeLessThan(v0 * 0.7);
+      // the hit removes at least the kind's loss fraction, and never stops the car dead
+      expect(minSpeed).toBeLessThanOrEqual(peak * (1 - OBSTACLE_SPECS[kind].loss) + 0.5);
+      expect(minSpeed).toBeGreaterThan(v0 * 0.3);
+      expect(car.forwardSpeed).toBeGreaterThan(10);
     }
   });
 
@@ -168,9 +173,9 @@ describe('ObstacleField interaction', () => {
     const run = (lateralGap: number) => {
       const { track, field, events } = setup();
       field['patterns'].set(5, { name: 'block-centre', total: 1, passed: 0, hit: false, done: false });
-      field['place']('block', 300, 0, 5, 0);
+      field['place']('block', 200, 0, 5, 0);
       const r = OBSTACLE_SPECS.block.radius;
-      const car = carAt(track, 270, r + CAR_TUNING.bodyRadius + lateralGap, 32);
+      const car = carAt(track, 170, r + CAR_TUNING.bodyRadius + lateralGap, 32);
       for (let i = 0; i < 90; i++) {
         car.step(DT, driveAlong(car, track, { lateral: r + CAR_TUNING.bodyRadius + lateralGap }));
         field.step(car);

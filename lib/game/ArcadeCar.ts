@@ -373,40 +373,61 @@ export class ArcadeCar {
   }
 
   /**
-   * Collide the car body against a static circle (an obstacle). Returns the impact
+   * Collide the car body against a static circle (an obstacle). Returns the closing
    * speed (0 when not touching). `loss` is the fraction of speed removed on a hit.
+   * Soft obstacles (cones) only bleed speed; solid ones (blocks) also deflect the car
+   * so it glances off instead of stopping dead.
    */
-  public collideCircle(cx: number, cz: number, radius: number, loss: number, kind: string): number {
+  public collideCircle(cx: number, cz: number, radius: number, loss: number, kind: string, solid: boolean): number {
     const T = CAR_TUNING;
     const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
-    let maxImpact = 0;
+    const rx = -fz, rz = fx;
+    let closing = 0;
+    let nx = 0, nz = 0;
     let touched = false;
     for (const off of [T.axleOffset, -T.axleOffset]) {
       const px = this.x + fx * off, pz = this.z + fz * off;
       const hit = circleVsCircle(cx, cz, radius, px, pz, T.bodyRadius);
       if (!hit) continue;
       touched = true;
-      // hit normal points from the obstacle to the probe: push the car out along it
-      this.x += hit.nx * hit.depth;
-      this.z += hit.nz * hit.depth;
-      const vn = this.vx * hit.nx + this.vz * hit.nz;
-      if (vn < 0) {
-        const impact = -vn;
-        this.vx -= (1 + 0.1) * vn * hit.nx;
-        this.vz -= (1 + 0.1) * vn * hit.nz;
-        if (impact > maxImpact) maxImpact = impact;
+      if (solid) {
+        // hit normal points from the obstacle to the probe: keep the car outside it
+        this.x += hit.nx * hit.depth;
+        this.z += hit.nz * hit.depth;
       }
+      const vn = this.vx * hit.nx + this.vz * hit.nz;
+      if (-vn > closing) { closing = -vn; nx = hit.nx; nz = hit.nz; }
     }
     if (!touched) return 0;
-    if (maxImpact > 0.5) {
-      this.vx *= 1 - loss;
-      this.vz *= 1 - loss;
-      if (this.time - this.lastImpactTime > 0.2) {
-        this.lastImpactTime = this.time;
-        this.impacts.push({ magnitude: maxImpact, x: cx, z: cz, other: 'obstacle', kind });
+    const fresh = this.time - this.lastImpactTime > 0.3;
+    if (closing > 0.5 && fresh) {
+      this.lastImpactTime = this.time;
+      const speed = Math.hypot(this.vx, this.vz);
+      const kept = speed * (1 - loss);
+      if (solid && speed > 0.1) {
+        // glance off: steer the velocity away from the obstacle, never straight back into it
+        let side = nx * rx + nz * rz;
+        if (Math.abs(side) < 0.25) side = side >= 0 ? 1 : -1;
+        const dx = nx + rx * Math.sign(side) * 0.8;
+        const dz = nz + rz * Math.sign(side) * 0.8;
+        const dl = Math.hypot(dx, dz) || 1;
+        let ux = this.vx / speed + (dx / dl) * 1.1;
+        let uz = this.vz / speed + (dz / dl) * 1.1;
+        const ul = Math.hypot(ux, uz) || 1;
+        ux /= ul; uz /= ul;
+        this.vx = ux * kept;
+        this.vz = uz * kept;
+      } else {
+        this.vx *= 1 - loss;
+        this.vz *= 1 - loss;
       }
+      this.impacts.push({ magnitude: closing, x: cx, z: cz, other: 'obstacle', kind });
+    } else if (solid && closing > 0.5) {
+      // still leaning on it after the hit: bleed the component pushing into it
+      this.vx += nx * closing;
+      this.vz += nz * closing;
     }
-    return maxImpact;
+    return closing;
   }
 
   /** Symmetric car-vs-car response. Call once per pair per step. */

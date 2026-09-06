@@ -8,8 +8,10 @@ export const ENDLESS_TUNING = {
   /** Road kept generated ahead of / behind the player. */
   windowAhead: 600,
   windowBehind: 120,
-  /** Opening straight so the first seconds are a clean launch. */
-  openingStraight: 160,
+  /** Opening straight so the first seconds are a clean launch (the grid sits inside it). */
+  openingStraight: 240,
+  /** Where the player starts along the road; the rival starts `rivalStartGap` behind. */
+  playerStart: 70,
   openingWidth: 16,
   /** Heading is confined to this cone around +Z so the road never folds back. */
   headingCone: (70 * Math.PI) / 180,
@@ -48,20 +50,23 @@ export const ENDLESS_TUNING = {
   desiredGapStart: 40,
   desiredGapEnd: 8,
   desiredGapFloor: 3,
-  /** Player speed low-pass (s) the rival paces itself against. */
-  refTau: 2.5,
-  rivalTau: 1.2,
-  rivalAccel: 10,
-  paceMaxStart: 50,
-  paceMaxEnd: 75,
+  /** Player speed low-pass (s) the rival paces itself against: short, so braking for a corner costs little but a crash does. */
+  refTau: 0.8,
+  rivalTau: 0.6,
+  rivalAccel: 22,
+  paceMaxStart: 60,
+  paceMaxEnd: 78,
+  /** Rival cornering: lateral grip budget (m/s²) and braking used to plan corner speed. */
+  rivalLatAccel: 11,
+  rivalBrake: 22,
   closeRateStart: 0.5,
   closeRateEnd: 1.2,
-  recedeRateStart: 0.15,
-  recedeRateEnd: 0.05,
+  recedeRateStart: 0.25,
+  recedeRateEnd: 0.08,
   recedeFloor: 0.7,
   leashExtra: 45,
-  surgeLight: { speed: 6, time: 1.5 },
-  surgeHeavy: { speed: 10, time: 2.0 },
+  surgeLight: { speed: 8, time: 1.5 },
+  surgeHeavy: { speed: 12, time: 2.0 },
   heavyImpact: 6,
   catchDistance: 3.5,
   startGrace: 4,

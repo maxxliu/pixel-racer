@@ -16,14 +16,17 @@ export interface ObstacleSpec {
   radius: number;
   /** Fraction of speed removed on contact (solid kinds). */
   loss: number;
+  /** Counts as a hazard: takes lane space, can be hit, can be near-missed. */
   solid: boolean;
+  /** Physically blocks the car (blocks) rather than just bleeding speed (cones). */
+  bounce: boolean;
 }
 
 export const OBSTACLE_SPECS: Record<ObstacleKind, ObstacleSpec> = {
-  cones: { radius: 0.9, loss: 0.15, solid: true },
-  block: { radius: 1.5, loss: 0.45, solid: true },
-  oil: { radius: 2.2, loss: 0, solid: false },
-  boost: { radius: 1.6, loss: 0, solid: false },
+  cones: { radius: 0.9, loss: 0.15, solid: true, bounce: false },
+  block: { radius: 1.5, loss: 0.45, solid: true, bounce: true },
+  oil: { radius: 2.2, loss: 0, solid: false, bounce: false },
+  boost: { radius: 1.6, loss: 0, solid: false, bounce: false },
 };
 
 export interface Obstacle {
@@ -334,7 +337,7 @@ export class ObstacleField {
       }
 
       if (spec.solid && o.alive && dist < o.radius + CAR_TUNING.bodyRadius + CAR_TUNING.axleOffset) {
-        const impact = car.collideCircle(o.x, o.z, o.radius, spec.loss, o.kind);
+        const impact = car.collideCircle(o.x, o.z, o.radius, spec.loss, o.kind, spec.bounce);
         if (impact > 0.5 && !o.hit) {
           o.hit = true;
           if (o.kind === 'cones') o.alive = false;
