@@ -7,38 +7,26 @@ import { Button, LinkButton } from '@/components/ui/Button';
 import { Kbd } from '@/components/ui/Kbd';
 import { SettingsModal } from '@/components/ui/SettingsModal';
 import { formatTime } from '@/lib/utils/format';
-import { getScores, type ScoreEntry } from '@/lib/scores';
+import { getScores, type RankedScore } from '@/lib/scores';
+import { BUILTIN_TRACK_ID } from '@/lib/tracks';
 
 const RacingBackground = dynamic(() => import('@/components/home/RacingBackground'), { ssr: false });
-
-interface GlobalEntry {
-  id: string;
-  playerName: string;
-  timeMs: number;
-  gameMode: string;
-  trackName: string;
-}
 
 const MODES = [
   { href: '/play?mode=time-trial', title: 'Time Trial', blurb: 'Just you, the sunset, and the clock. Chase gold.', accent: 'from-sun to-coral', hint: 'Solo' },
   { href: '/play?mode=race', title: 'Race vs AI', blurb: 'Three laps against a pack that bumps back.', accent: 'from-coral to-pink', hint: 'Grid start' },
   { href: '/create-track', title: 'Create Track', blurb: 'Draw a loop or generate one. Race it in seconds.', accent: 'from-lime to-sky', hint: 'Editor' },
-  { href: '/tracks', title: 'Track Library', blurb: 'Community circuits with their own leaderboards.', accent: 'from-sky to-[#b38cff]', hint: 'Browse' },
+  { href: '/tracks', title: 'Track Library', blurb: 'Your saved circuits, each with its own best times.', accent: 'from-sky to-[#b38cff]', hint: 'Browse' },
 ];
 
 export default function Home() {
-  const [online, setOnline] = useState<GlobalEntry[] | null>(null);
-  const [local, setLocal] = useState<(ScoreEntry & { rank: number })[]>([]);
+  const [trials, setTrials] = useState<RankedScore[]>([]);
+  const [races, setRaces] = useState<RankedScore[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
-    setLocal(getScores('time-trial').slice(0, 5));
-    const ctrl = new AbortController();
-    fetch('/api/leaderboard/global?limit=8', { signal: ctrl.signal })
-      .then(async (r) => (r.ok ? ((await r.json()) as GlobalEntry[]) : []))
-      .then(setOnline)
-      .catch(() => setOnline([]));
-    return () => ctrl.abort();
+    setTrials(getScores({ trackId: BUILTIN_TRACK_ID, mode: 'time-trial' }).slice(0, 5));
+    setRaces(getScores({ trackId: BUILTIN_TRACK_ID, mode: 'race' }).slice(0, 5));
   }, []);
 
   return (
@@ -85,16 +73,16 @@ export default function Home() {
         <section className="mt-6 grid gap-3 md:grid-cols-2">
           <div className="glass p-5">
             <div className="flex items-baseline justify-between">
-              <h2 className="text-display-m italic">Your best</h2>
+              <h2 className="text-display-m italic">Sunset Circuit · time trial</h2>
               <Link href="/leaderboard" className="text-xs uppercase tracking-wider text-muted hover:text-cream">All scores</Link>
             </div>
-            {local.length === 0 ? (
-              <p className="mt-3 text-sm text-muted">No local times yet. Run a time trial to set one.</p>
+            {trials.length === 0 ? (
+              <p className="mt-3 text-sm text-muted">No times yet. Run a time trial to set one.</p>
             ) : (
               <ol className="mt-3 space-y-1 text-sm">
-                {local.map((s) => (
-                  <li key={`${s.playerName}-${s.time}-${s.date}`} className="flex justify-between">
-                    <span><span className="mr-2 text-muted hud-num">{s.rank}.</span>{s.playerName}</span>
+                {trials.map((s) => (
+                  <li key={`${s.date}-${s.time}`} className="flex justify-between">
+                    <span><span className="mr-2 text-muted hud-num">{s.rank}.</span>{s.playerName} <span className="text-muted">· {s.laps} lap{s.laps === 1 ? '' : 's'}</span></span>
                     <span className="hud-num text-sun">{formatTime(s.time)}</span>
                   </li>
                 ))}
@@ -102,17 +90,15 @@ export default function Home() {
             )}
           </div>
           <div className="glass p-5">
-            <h2 className="text-display-m italic">World records</h2>
-            {online === null ? (
-              <p className="mt-3 text-sm text-muted">Loading…</p>
-            ) : online.length === 0 ? (
-              <p className="mt-3 text-sm text-muted">No online records yet. Post a time on a library track.</p>
+            <h2 className="text-display-m italic">Sunset Circuit · race</h2>
+            {races.length === 0 ? (
+              <p className="mt-3 text-sm text-muted">No race results yet. Take on the AI.</p>
             ) : (
               <ol className="mt-3 space-y-1 text-sm">
-                {online.map((e, i) => (
-                  <li key={e.id} className="flex justify-between gap-3">
-                    <span className="truncate"><span className="mr-2 text-muted hud-num">{i + 1}.</span>{e.playerName} <span className="text-muted">· {e.trackName}</span></span>
-                    <span className="shrink-0 hud-num text-sun">{formatTime(e.timeMs)}</span>
+                {races.map((s) => (
+                  <li key={`${s.date}-${s.time}`} className="flex justify-between gap-3">
+                    <span className="truncate"><span className="mr-2 text-muted hud-num">{s.rank}.</span>{s.playerName} <span className="text-muted">· P{s.position ?? '-'}</span></span>
+                    <span className="shrink-0 hud-num text-sun">{formatTime(s.time)}</span>
                   </li>
                 ))}
               </ol>

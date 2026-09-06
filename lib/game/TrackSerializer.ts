@@ -1,8 +1,9 @@
 /**
  * Track metadata helpers shared by the creator, browser and API.
  */
-import type { TrackWaypoint, StartPosition } from '@/lib/game/types';
-import type { Difficulty } from '@/lib/supabase/types';
+import type { TrackWaypoint } from '@/lib/game/types';
+
+export type Difficulty = 'easy' | 'medium' | 'hard' | 'expert';
 import { calculatePathLength, type Point2D } from '@/lib/track/TrackGeometryUtils';
 import { estimateDifficulty, countTurnsByType } from '@/lib/track/CurvatureAnalyzer';
 
@@ -18,14 +19,6 @@ export function computeTrackStats(waypoints: TrackWaypoint[]): TrackStats {
   const difficulty = estimateDifficulty(points);
   const turns = countTurnsByType(points);
   return { trackLengthM, difficulty, turnCount: turns.medium + turns.tight + turns.hairpin };
-}
-
-/** Payload sent to POST /api/tracks. The server computes stats and the thumbnail. */
-export interface TrackSubmission {
-  name: string;
-  author_name: string;
-  waypoints: TrackWaypoint[];
-  start_position: StartPosition;
 }
 
 export function getDifficultyColor(difficulty: Difficulty | null | undefined): string {

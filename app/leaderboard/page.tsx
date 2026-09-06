@@ -5,15 +5,15 @@ import { PageShell } from '@/components/ui/PageShell';
 import { Button, LinkButton } from '@/components/ui/Button';
 import { Panel } from '@/components/ui/Panel';
 import { formatTime } from '@/lib/utils/format';
-import { getScores, clearScores, type ScoreEntry } from '@/lib/scores';
+import { getScores, clearScores, type RankedScore } from '@/lib/scores';
 
 type Mode = 'time-trial' | 'race';
 
 export default function LeaderboardPage() {
   const [mode, setMode] = useState<Mode>('time-trial');
-  const [entries, setEntries] = useState<(ScoreEntry & { rank: number })[]>([]);
+  const [entries, setEntries] = useState<RankedScore[]>([]);
 
-  useEffect(() => { setEntries(getScores(mode)); }, [mode]);
+  useEffect(() => { setEntries(getScores({ mode })); }, [mode]);
 
   const clear = () => {
     if (confirm('Clear every local score on this device?')) {
@@ -25,7 +25,7 @@ export default function LeaderboardPage() {
   return (
     <PageShell
       title="High scores"
-      subtitle="Times saved on this device. Library tracks also post to their own online leaderboards."
+      subtitle="Every result saved on this device, across all tracks."
       back={{ href: '/', label: 'Menu' }}
       actions={entries.length > 0 ? <Button size="sm" variant="danger" onClick={clear}>Clear all</Button> : null}
     >
@@ -50,6 +50,7 @@ export default function LeaderboardPage() {
               <tr>
                 <th scope="col" className="px-4 py-3">Rank</th>
                 <th scope="col" className="px-4 py-3">Driver</th>
+                <th scope="col" className="px-4 py-3">Track</th>
                 {mode === 'race' && <th scope="col" className="px-4 py-3">Finish</th>}
                 <th scope="col" className="px-4 py-3">Time</th>
                 <th scope="col" className="px-4 py-3">Date</th>
@@ -60,6 +61,7 @@ export default function LeaderboardPage() {
                 <tr key={`${e.playerName}-${e.time}-${e.date}-${i}`} className="border-t border-cream/10">
                   <td className={`px-4 py-3 font-display font-bold hud-num ${e.rank === 1 ? 'text-sun' : e.rank === 2 ? 'text-cream' : e.rank === 3 ? 'text-[#ff8a5b]' : 'text-muted'}`}>#{e.rank}</td>
                   <td className="px-4 py-3">{e.playerName}</td>
+                  <td className="px-4 py-3 text-muted">{e.trackName} · {e.laps} lap{e.laps === 1 ? '' : 's'}</td>
                   {mode === 'race' && <td className="px-4 py-3 text-muted">P{e.position ?? '-'}</td>}
                   <td className="px-4 py-3 hud-num text-sun">{formatTime(e.time)}</td>
                   <td className="px-4 py-3 text-muted">{new Date(e.date).toLocaleDateString()}</td>

@@ -2,21 +2,16 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RaceResults } from '@/lib/game/Game';
-import { saveScore } from '@/lib/scores';
+import { saveScore, getScores, type RankedScore } from '@/lib/scores';
 import { formatTime, formatDelta, ordinal } from '@/lib/utils/format';
 import { hex } from '@/lib/game/palette';
 import { Button } from '@/components/ui/Button';
 import { Label } from '@/components/ui/Panel';
 
-interface LeaderboardEntry {
-  id: string;
-  player_name: string;
-  time_ms: number;
-}
-
 interface RaceCompleteProps {
   results: RaceResults;
-  trackId?: string;
+  trackId: string;
+  trackName: string;
   onPlayAgain: () => void;
   onMainMenu: () => void;
 }
@@ -26,7 +21,7 @@ type Medal = 'gold' | 'silver' | 'bronze' | null;
 /** Par times from track length: a clean lap averages roughly these speeds. */
 function medalFor(results: RaceResults): Medal {
   const dist = results.trackLength * results.totalLaps;
-  const avg = dist / (results.totalTime / 1000); // m/s
+  const avg = dist / (results.totalTime / 1000);
   if (avg >= 33) return 'gold';
   if (avg >= 27) return 'silver';
   if (avg >= 21) return 'bronze';
@@ -39,13 +34,10 @@ const MEDAL_STYLE: Record<Exclude<Medal, null>, string> = {
   bronze: 'from-[#ff8a5b] to-[#c96a3a] text-ink',
 };
 
-export default function RaceComplete({ results, trackId, onPlayAgain, onMainMenu }: RaceCompleteProps) {
+export default function RaceComplete({ results, trackId, trackName, onPlayAgain, onMainMenu }: RaceCompleteProps) {
   const [name, setName] = useState('');
-  const [saved, setSaved] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [rank, setRank] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [board, setBoard] = useState<LeaderboardEntry[] | null>(null);
+  const [savedRank, setSavedRank] = useState<number | null>(null);
+  const [board, setBoard] = useState<RankedScore[]>([]);
   const nameRef = useRef<HTMLInputElement>(null);
 
   const isRace = results.mode === 'race';
@@ -53,74 +45,52 @@ export default function RaceComplete({ results, trackId, onPlayAgain, onMainMenu
   const medal = !isRace ? medalFor(results) : null;
   const best = results.bestLap;
 
+  const loadBoard = useCallback(() => {
+    setBoard(getScores({ trackId, mode: results.mode, laps: results.totalLaps }).slice(0, 8));
+  }, [trackId, results.mode, results.totalLaps]);
+
   useEffect(() => {
     try { setName(localStorage.getItem('pixel-racer-name') ?? ''); } catch { /* ignore */ }
+    loadBoard();
     const t = setTimeout(() => nameRef.current?.focus(), 400);
     return () => clearTimeout(t);
-  }, []);
+  }, [loadBoard]);
 
-  const fetchBoard = useCallback(async (signal?: AbortSignal) => {
-    if (!trackId) return;
-    try {
-      const res = await fetch(`/api/tracks/${trackId}/leaderboard?limit=8&mode=${results.mode}`, { signal });
-      if (!res.ok) { setBoard([]); return; }
-      const data = (await res.json()) as LeaderboardEntry[];
-      setBoard(Array.isArray(data) ? data : []);
-    } catch (e) {
-      if ((e as Error).name !== 'AbortError') setBoard([]);
-    }
-  }, [trackId, results.mode]);
-
-  useEffect(() => {
-    const ctrl = new AbortController();
-    void fetchBoard(ctrl.signal);
-    return () => ctrl.abort();
-  }, [fetchBoard]);
-
-  const submit = useCallback(async () => {
+  const submit = useCallback(() => {
     const clean = name.trim().slice(0, 20);
-    if (!clean || submitting) return;
+    if (!clean || savedRank !== null) return;
     try { localStorage.setItem('pixel-racer-name', clean); } catch { /* ignore */ }
-    saveScore({ playerName: clean, gameMode: results.mode, time: Math.round(results.totalTime), date: new Date().toISOString(), position: isRace ? results.position : undefined, trackId });
-    setSaved(true);
-    if (!trackId) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/tracks/${trackId}/leaderboard`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ player_name: clean, time_ms: Math.round(results.totalTime), lap_times: results.lapTimes.map(Math.round), game_mode: results.mode }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (typeof data.rank === 'number') setRank(data.rank);
-        void fetchBoard();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setError(data.error || `Could not submit (${res.status})`);
-      }
-    } catch {
-      setError('Network error');
-    } finally {
-      setSubmitting(false);
-    }
-  }, [name, submitting, results, isRace, trackId, fetchBoard]);
+    const rank = saveScore({
+      playerName: clean,
+      gameMode: results.mode,
+      time: Math.round(results.totalTime),
+      bestLap: Math.round(results.bestLap),
+      laps: results.totalLaps,
+      date: new Date().toISOString(),
+      position: isRace ? results.position : undefined,
+      trackId,
+      trackName,
+    });
+    setSavedRank(rank);
+    loadBoard();
+  }, [name, savedRank, results, isRace, trackId, trackName, loadBoard]);
+
+  const previousBest = board.find((b) => savedRank === null || b.rank !== savedRank);
+  const isNewRecord = savedRank === 1;
 
   return (
     <div className="fixed inset-0 z-40 overflow-y-auto bg-ink/80 backdrop-blur-md anim-fade-in">
       <div className="mx-auto flex min-h-full max-w-3xl flex-col justify-center px-4 py-8">
-        {/* hero */}
         <div className="anim-slide-up text-center">
           {isRace ? (
             <>
-              <div className="text-label uppercase text-muted">Race finished</div>
+              <div className="text-label uppercase text-muted">Race finished · {trackName}</div>
               <div className={`text-display-xl italic ${won ? 'text-lime' : 'text-cream'}`}>{ordinal(results.position)}</div>
               <div className="mt-1 text-muted">{won ? 'You won the race!' : `Finished ${ordinal(results.position)} of ${results.standings.length}`}</div>
             </>
           ) : (
             <>
-              <div className="text-label uppercase text-muted">Time trial complete</div>
+              <div className="text-label uppercase text-muted">Time trial · {trackName}</div>
               <div className="text-display-xl italic text-cream hud-num">{formatTime(results.totalTime)}</div>
               {medal ? (
                 <div className={`mt-3 inline-block rounded-full bg-gradient-to-r px-4 py-1 font-display text-sm font-bold uppercase tracking-wider ${MEDAL_STYLE[medal]}`}>{medal} medal</div>
@@ -129,10 +99,10 @@ export default function RaceComplete({ results, trackId, onPlayAgain, onMainMenu
               )}
             </>
           )}
+          {isNewRecord && <div className="mt-2 font-display text-sm font-bold uppercase tracking-wider text-lime anim-pop">New track record</div>}
         </div>
 
         <div className="mt-8 grid gap-4 md:grid-cols-2">
-          {/* laps */}
           <div className="glass-solid p-5 anim-slide-up" style={{ animationDelay: '80ms' }}>
             <Label className="mb-3">Laps</Label>
             <div className="space-y-2">
@@ -161,7 +131,6 @@ export default function RaceComplete({ results, trackId, onPlayAgain, onMainMenu
             </div>
           </div>
 
-          {/* standings or leaderboard */}
           <div className="glass-solid p-5 anim-slide-up" style={{ animationDelay: '140ms' }}>
             {isRace ? (
               <>
@@ -184,35 +153,27 @@ export default function RaceComplete({ results, trackId, onPlayAgain, onMainMenu
               </>
             ) : (
               <>
-                <Label className="mb-3">{trackId ? 'Track leaderboard' : 'Best lap'}</Label>
-                {trackId ? (
-                  board === null ? <div className="text-sm text-muted">Loading…</div>
-                  : board.length === 0 ? <div className="text-sm text-muted">No times yet. Set the first one.</div>
-                  : (
-                    <ol className="space-y-1 text-sm">
-                      {board.map((e, i) => (
-                        <li key={e.id} className="flex justify-between">
-                          <span><span className="mr-2 text-muted hud-num">{i + 1}.</span>{e.player_name}</span>
-                          <span className="hud-num">{formatTime(e.time_ms)}</span>
-                        </li>
-                      ))}
-                    </ol>
-                  )
+                <Label className="mb-3">Best times · {results.totalLaps} lap{results.totalLaps === 1 ? '' : 's'}</Label>
+                {board.length === 0 ? (
+                  <p className="text-sm text-muted">No saved times on this track yet. {previousBest ? '' : 'Save yours below.'}</p>
                 ) : (
-                  <div>
-                    <div className="text-3xl font-bold italic hud-num text-sun">{formatTime(best)}</div>
-                    <div className="mt-2 text-xs text-muted">Play a library track to post times to its leaderboard.</div>
-                  </div>
+                  <ol className="space-y-1 text-sm">
+                    {board.map((e) => (
+                      <li key={`${e.date}-${e.time}`} className={`flex justify-between ${e.rank === savedRank ? 'text-lime' : ''}`}>
+                        <span><span className="mr-2 text-muted hud-num">{e.rank}.</span>{e.playerName}</span>
+                        <span className="hud-num">{formatTime(e.time)}</span>
+                      </li>
+                    ))}
+                  </ol>
                 )}
               </>
             )}
           </div>
         </div>
 
-        {/* save */}
         <div className="glass-solid mt-4 p-5 anim-slide-up" style={{ animationDelay: '200ms' }}>
-          {!saved ? (
-            <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+          {savedRank === null ? (
+            <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={(e) => { e.preventDefault(); submit(); }}>
               <label className="flex-1">
                 <span className="mb-1 block text-xs uppercase tracking-wider text-muted">Driver name</span>
                 <input ref={nameRef} className="input" value={name} maxLength={20} placeholder="Your name" onChange={(e) => setName(e.target.value)} />
@@ -220,12 +181,7 @@ export default function RaceComplete({ results, trackId, onPlayAgain, onMainMenu
               <Button type="submit" variant="primary" disabled={!name.trim()}>Save time</Button>
             </form>
           ) : (
-            <div className="text-sm">
-              {rank ? <span className="text-lime">Posted to the leaderboard — rank #{rank}.</span>
-                : error ? <span className="text-coral">Saved locally. Leaderboard: {error}</span>
-                : submitting ? <span className="text-muted">Posting…</span>
-                : <span className="text-muted">Saved to your local high scores.</span>}
-            </div>
+            <p className="text-sm text-lime">Saved. Rank #{savedRank} on {trackName} for {results.mode === 'race' ? 'race' : 'time trial'} results on this device.</p>
           )}
         </div>
 

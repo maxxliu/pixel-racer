@@ -1,6 +1,5 @@
 import { formatTime, formatDelta, formatTrackLength, ordinal } from '@/lib/utils/format';
 import { sanitizeSettings, DEFAULT_SETTINGS } from '@/lib/settings';
-import { parseIntParam, sanitizeSearch, cleanString, validateTrackWaypoints, validateLapTimes, validateStartPosition } from '@/lib/api/validate';
 import { generateThumbnailSvg } from '@/lib/track/thumbnail';
 import { DEFAULT_WAYPOINTS } from '@/lib/game/TrackSpline';
 import { GameLoop } from '@/lib/game/GameLoop';
@@ -36,44 +35,6 @@ describe('settings', () => {
     expect(s.difficulty).toBe('normal');
     expect(s.audio.master).toBe(1);
     expect(s.audio.engine).toBe(DEFAULT_SETTINGS.audio.engine);
-  });
-});
-
-describe('api validation', () => {
-  test('parseIntParam clamps and rejects NaN', () => {
-    expect(parseIntParam('abc', 20, 1, 50)).toBe(20);
-    expect(parseIntParam('999999', 20, 1, 50)).toBe(50);
-    expect(parseIntParam('-4', 0, 0, 100)).toBe(0);
-    expect(parseIntParam('7.9', 0, 0, 100)).toBe(7);
-  });
-  test('sanitizeSearch strips PostgREST specials', () => {
-    expect(sanitizeSearch('name,eq.x)')).toBe('name eq x');
-    expect(sanitizeSearch('%%%')).toBeNull();
-    expect(sanitizeSearch('a'.repeat(200))!.length).toBe(60);
-  });
-  test('cleanString rejects non-strings and control chars', () => {
-    expect(cleanString(42, 10)).toBeNull();
-    expect(cleanString('  hithere ', 10)).toBe('hithere');
-    expect(cleanString('x'.repeat(30), 5)).toBe('xxxxx');
-  });
-  test('validateTrackWaypoints accepts the default track and rejects junk', () => {
-    const ok = validateTrackWaypoints(DEFAULT_WAYPOINTS);
-    expect('waypoints' in ok).toBe(true);
-    expect('error' in validateTrackWaypoints('nope')).toBe(true);
-    expect('error' in validateTrackWaypoints([{ x: 'a', z: 0, width: 10 }])).toBe(true);
-    expect('error' in validateTrackWaypoints(Array(8).fill({ x: 0, z: 0, width: 10 }))).toBe(true);
-    expect('error' in validateTrackWaypoints(Array(500).fill({ x: 0, z: 0, width: 10 }))).toBe(true);
-  });
-  test('validateStartPosition', () => {
-    expect(validateStartPosition({ x: 1, z: 2, rotation: 0 })).toEqual({ x: 1, z: 2, rotation: 0 });
-    expect(validateStartPosition({ x: 'a' })).toBeNull();
-    expect(validateStartPosition({ x: 99999, z: 0, rotation: 0 })).toBeNull();
-  });
-  test('validateLapTimes must add up', () => {
-    expect(validateLapTimes([30000, 30000], 60000)).toEqual([30000, 30000]);
-    expect(validateLapTimes([30000, 30000], 90000)).toHaveProperty('error');
-    expect(validateLapTimes([10], 60000)).toHaveProperty('error');
-    expect(validateLapTimes(undefined, 60000)).toBeNull();
   });
 });
 
