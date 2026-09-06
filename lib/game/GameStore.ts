@@ -59,6 +59,8 @@ export interface HudState {
   bestScore: number;
   runTime: number;
   caught: boolean;
+  /** Rear-view mirror strip is being drawn at the top of the canvas. */
+  mirror: boolean;
 }
 
 export function createHudState(totalLaps: number, totalRacers: number): HudState {
@@ -70,7 +72,7 @@ export function createHudState(totalLaps: number, totalRacers: number): HudState
     driftCharge: 0, driftTier: 0, isDrifting: false, boostTime: 0, boostTier: 0,
     wrongWay: false, offTrack: false, stuck: false,
     dots: [], notices: [], fps: 60, showDriftHint: false,
-    score: 0, distance: 0, multiplier: 1, combo: 0, gap: 60, danger: 0, bestScore: 0, runTime: 0, caught: false,
+    score: 0, distance: 0, multiplier: 1, combo: 0, gap: 60, danger: 0, bestScore: 0, runTime: 0, caught: false, mirror: false,
   };
 }
 

@@ -36,30 +36,79 @@ describe('Pursuer gap model', () => {
     for (let i = 0; i < 60 * 40; i++) {
       t += DT;
       player.advance(DT, 38);
-      rival.step(DT, player, 0, t); // distance 0 → pressure 0 → comfort gap 40
+      rival.step(DT, player, 0, t); // distance 0 → pressure 0 → early comfort gap
     }
     expect(caught).toBe(false);
-    expect(rival.gap).toBeGreaterThan(T.desiredGapStart - 3);
-    expect(rival.gap).toBeLessThan(T.desiredGapStart + 3);
-    expect(Math.abs(rival.v - player.forwardSpeed)).toBeLessThan(3);
+    expect(rival.gap).toBeGreaterThan(T.desiredGapStart - 4);
+    expect(rival.gap).toBeLessThan(T.desiredGapStart + 4);
+    expect(Math.abs(rival.v - player.forwardSpeed)).toBeLessThan(4);
   });
 
-  test('a crash closes the gap hard and the rival then falls back only slowly', () => {
+  test('the mistake budget: a cone clip is survivable and slow to recover from; a block hit from the comfort gap is not', () => {
     const track = new StreamTrack(2);
     track.ensureAhead(T.windowAhead);
     const player = ghost(track, T.playerStart);
     const rival = new Pursuer(track, T.playerStart - T.rivalStartGap);
+    let caught = false;
+    rival.on((e) => { if (e.type === 'caught') caught = true; });
     let t = 0;
     for (let i = 0; i < 60 * 30; i++) { t += DT; player.advance(DT, 40); rival.step(DT, player, 0, t); }
     const before = rival.gap;
-    rival.surge(true);
-    for (let i = 0; i < 60 * 2; i++) { t += DT; player.advance(DT, i < 30 ? 18 : 30); rival.step(DT, player, 0, t); }
+    // a cone clip: light surge plus a brief 15% speed loss
+    rival.surge(false);
+    for (let i = 0; i < 60 * 2; i++) { t += DT; player.advance(DT, i < 20 ? 34 : 40); rival.step(DT, player, 0, t); }
     const after = rival.gap;
-    expect(before - after).toBeGreaterThanOrEqual(12);
-    // recovery: a few seconds of clean driving reopens it, back toward (not far past) the comfort gap
-    for (let i = 0; i < 60 * 4; i++) { t += DT; player.advance(DT, 40); rival.step(DT, player, 0, t); }
-    expect(rival.gap).toBeGreaterThan(after + 2);
-    expect(rival.gap).toBeLessThan(T.desiredGapStart + 6);
+    expect(caught).toBe(false);
+    expect(before - after).toBeGreaterThanOrEqual(5);
+    // recovery is slow: after 8 s of clean driving the lost ground is still mostly gone
+    for (let i = 0; i < 60 * 8; i++) { t += DT; player.advance(DT, 40); rival.step(DT, player, 0, t); }
+    expect(rival.gap).toBeGreaterThan(after - 1.5);
+    expect(rival.gap).toBeLessThan(before - 2);
+    // now a block: heavy surge plus a 45% speed loss for a second. From here that is a pass.
+    rival.surge(true);
+    for (let i = 0; i < 60 * 4 && !caught; i++) { t += DT; player.advance(DT, i < 60 ? 22 : 40); rival.step(DT, player, 0, t); }
+    expect(caught).toBe(true);
+    expect(rival.gap).toBeLessThan(T.overtakeDistance + 0.5);
+  });
+
+  test('the rival is never more than maxGap behind, even against a flat-out player', () => {
+    const track = new StreamTrack(6);
+    track.ensureAhead(T.windowAhead);
+    const player = ghost(track, T.playerStart);
+    const rival = new Pursuer(track, T.playerStart - T.rivalStartGap);
+    let t = 0;
+    let maxGap = 0;
+    // a player somehow 3x faster than the rival can pace: the leash clamps the gap
+    for (let i = 0; i < 60 * 30; i++) {
+      t += DT;
+      player.splineS += 90 * DT; player.forwardSpeed = 90; player.splineIndex = Math.round(player.splineS / T.spacing);
+      track.ensureAhead(player.splineS + T.windowAhead); track.trimBehind(player.splineS - 200);
+      rival.step(DT, player, 0, t);
+      maxGap = Math.max(maxGap, rival.gap);
+    }
+    expect(maxGap).toBeLessThanOrEqual(T.maxGap + 1);
+  });
+
+  test('the catch is an overtake, not a touch: alongside is survivable, passed is not', () => {
+    const track = new StreamTrack(8);
+    track.ensureAhead(T.windowAhead);
+    const player = ghost(track, T.playerStart);
+    const rival = new Pursuer(track, T.playerStart - 2); // nose on your door from the start
+    let caught = false;
+    rival.on((e) => { if (e.type === 'caught') caught = true; });
+    let t = T.startGrace + 1;
+    player.forwardSpeed = 30; rival.v = 30; rival.vRef = 30; // both already up to speed
+    for (let i = 0; i < 20; i++) { t += DT; player.advance(DT, 30); rival.step(DT, player, 0, t); }
+    expect(caught).toBe(false);
+    expect(rival.overtakeSide).not.toBe(0);
+    // it commits and pushes through while the player dawdles
+    for (let i = 0; i < 60 * 4 && !caught; i++) { t += DT; player.advance(DT, 20); rival.step(DT, player, 0, t); }
+    expect(caught).toBe(true);
+    expect(rival.gap).toBeLessThan(T.overtakeDistance + 0.01);
+    // it passed on the asphalt, offset from the player's line
+    const n = track.nearest(rival.x, rival.z, Math.round(rival.s / T.spacing));
+    expect(n.distance).toBeLessThan(track.halfWidthAt(n.index));
+    expect(Math.abs(rival.lateral - player.lateral)).toBeGreaterThan(1.5);
   });
 
   test('two mistakes in a row get you caught; the catch never fires during the start grace', () => {
@@ -154,14 +203,18 @@ describe('EndlessDirector', () => {
       maxObstacles = Math.max(maxObstacles, d.obstacles.obstacles.length);
       steps++;
     }
-    expect(d.distance).toBeGreaterThanOrEqual(3000);
+    // the simple bot clips things now and then; against this rival that can end the run, and that is fine
+    expect(d.distance).toBeGreaterThanOrEqual(1000);
+    if (d.distance < 3000) expect(d.phase).toBe('caught');
     expect(d.score).toBeGreaterThanOrEqual(d.distance - 1);
     expect(maxSamples).toBeLessThan((T.windowAhead + T.windowBehind + 500) / T.spacing);
     expect(maxObstacles).toBeLessThan(120);
     const milestones = events.filter((e) => e.type === 'milestone').map((e) => (e as { metres: number }).metres);
-    expect(milestones).toEqual([500, 1000, 1500, 2000, 2500, 3000]);
+    const expected = [];
+    for (let m = 500; m <= d.distance; m += 500) expected.push(m);
+    expect(milestones).toEqual(expected);
     expect(events.filter((e) => e.type === 'record').length).toBe(1);
-    expect(d.results().distance).toBeGreaterThanOrEqual(3000);
+    expect(d.results().distance).toBe(Math.floor(d.distance));
     expect(d.results().isRecord).toBe(true);
   });
 

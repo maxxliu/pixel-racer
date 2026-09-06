@@ -14,6 +14,7 @@ import { PALETTE } from '../palette';
 import type { GameSession } from '../GameSession';
 import type { MinimapData } from '../TrackSpline';
 import { InputManager } from '@/lib/input/InputManager';
+import { TouchInputHandler } from '@/lib/input/TouchInputHandler';
 import { HapticFeedback } from '@/lib/input/HapticFeedback';
 import { AudioEngine } from '@/lib/audio/AudioEngine';
 import { loadSettings, saveSettings, subscribeSettings, type GameSettings } from '@/lib/settings';
@@ -36,6 +37,8 @@ export interface EndlessGameOptions {
 }
 
 const DUSK_DISTANCE = 6000;
+/** Rear-view mirror: fraction of the canvas width (desktop / touch), max width and aspect. */
+export const MIRROR = { fracDesktop: 0.34, fracTouch: 0.46, maxWidth: 420, aspect: 3.2, top: 14, topTouch: 96 } as const;
 
 export class EndlessGame implements GameSession {
   public readonly store = new GameStore(1, 1);
@@ -55,6 +58,9 @@ export class EndlessGame implements GameSession {
   private rivalVisual!: CarVisual;
   private rivalFx!: CarEffects;
   private rivalLight!: THREE.PointLight;
+  private readonly rearCamera = new THREE.PerspectiveCamera(40, MIRROR.aspect, 0.5, 700);
+  private mirrorEnabled = false;
+  private readonly tmpV = new THREE.Vector3();
   private unsubscribeDirector: (() => void) | null = null;
   private unsubscribeSettings: (() => void) | null = null;
   private settings: GameSettings;
@@ -99,9 +105,10 @@ export class EndlessGame implements GameSession {
     this.playerFx = new CarEffects(this.particles, this.skids, 'p');
     this.rivalVisual = buildCarMesh(PALETTE.rival, { headlight: PALETTE.rivalLight, stripe: 0x2a2140, underglow: PALETTE.rivalLight });
     this.rivalLight = new THREE.PointLight(PALETTE.rivalLight, 8, 18, 2);
-    this.rivalLight.position.set(0, 0.7, -0.5);
-    this.rivalVisual.group.add(this.rivalLight);
+    this.engine.scene.add(this.rivalLight);
     this.engine.scene.add(this.rivalVisual.group);
+    this.mirrorEnabled = this.settings.quality !== 'low';
+    this.rearCamera.updateProjectionMatrix();
     this.rivalFx = new CarEffects(this.particles, this.skids, 'r');
     report(75, 'Fuelling cars');
     await nextFrame();
@@ -326,8 +333,9 @@ export class EndlessGame implements GameSession {
     s.runTime = d.runTime;
     s.bestScore = Math.max(this.bestScore, Math.floor(d.score));
     s.dots = [];
+    s.mirror = this.mirrorEnabled && this.camera.mode !== 'hood';
 
-    const cold = `${s.phase}|${s.gear}|${s.offTrack}|${s.stuck}|${s.boostTier}|${s.driftTier}|${s.isDrifting}|${s.countdown}|${s.go}|${s.multiplier}|${s.caught}`;
+    const cold = `${s.phase}|${s.gear}|${s.offTrack}|${s.stuck}|${s.boostTier}|${s.driftTier}|${s.isDrifting}|${s.countdown}|${s.go}|${s.multiplier}|${s.caught}|${s.mirror}`;
     const swept = this.store.sweep();
     if (cold !== this.lastColdKey && !swept) {
       this.lastColdKey = cold;
@@ -347,6 +355,8 @@ export class EndlessGame implements GameSession {
     updateCarVisual(this.rivalVisual, rival, alpha, dt);
     this.rivalVisual.group.updateMatrixWorld();
     this.rivalFx.update(dt, rival, this.rivalVisual);
+    const rg = this.rivalVisual.group.position;
+    this.rivalLight.position.set(rg.x, 0.7, rg.z);
     this.rivalLight.intensity = 5 + rival.danger * 9 + (rival.boostTime > 0 ? 4 : 0);
 
     this.camera.setRumble(pc.surface === 'grass' ? 1 : pc.surface === 'kerb' ? 0.5 : 0);
@@ -356,7 +366,33 @@ export class EndlessGame implements GameSession {
     this.environment.setProgress(this.director.distance / DUSK_DISTANCE);
     this.environment.update(this.engine.camera.position, pc.x, pc.z, this.time);
     this.engine.followShadow(pc.x, pc.z);
+    // never let the rival's body pop through the lens as it comes past
+    this.rivalVisual.group.visible = this.engine.camera.position.distanceTo(this.rivalVisual.group.position) > 2.6;
     this.engine.render();
+    if (this.mirrorEnabled && this.camera.mode !== 'hood') this.renderMirror(pc.x, pc.z, pc.heading);
+  }
+
+  /** Second pass: a rear-facing camera on the roof drawn into a scissored strip at the top of the canvas. */
+  private renderMirror(x: number, z: number, heading: number): void {
+    const r = this.engine.renderer;
+    const W = this.container.clientWidth, H = this.container.clientHeight;
+    if (W < 200 || H < 200) return;
+    const touch = TouchInputHandler.isTouchDevice();
+    const mw = Math.min(W * (touch ? MIRROR.fracTouch : MIRROR.fracDesktop), MIRROR.maxWidth);
+    const mh = mw / MIRROR.aspect;
+    const mx = (W - mw) / 2;
+    const my = H - (touch ? MIRROR.topTouch : MIRROR.top) - mh;
+    const fx = Math.sin(heading), fz = Math.cos(heading);
+    // just behind the spoiler, so the mirror shows the road and the rival, not your own boot
+    this.rearCamera.position.set(x - fx * 2.6, 1.9, z - fz * 2.6);
+    this.rearCamera.lookAt(this.tmpV.set(x - fx * 40, 0.8, z - fz * 40));
+    this.rivalVisual.group.visible = true;
+    r.setScissorTest(true);
+    r.setViewport(mx, my, mw, mh);
+    r.setScissor(mx, my, mw, mh);
+    r.render(this.engine.scene, this.rearCamera);
+    r.setScissorTest(false);
+    r.setViewport(0, 0, W, H);
   }
 
   public pause(): void {

@@ -61,6 +61,9 @@ export class Pursuer implements CarVisualState, CarFxState {
   private surgeSpeed = 0;
   private surgeTime = 0;
   private warned = false;
+  /** Which side it pulls alongside on (+1 right, -1 left), 0 while it is still behind. */
+  public overtakeSide: 0 | 1 | -1 = 0;
+  private commitLeft = 0;
   private readonly line = new Map<number, number>();
   private listeners: ((e: PursuerEvent) => void)[] = [];
 
@@ -76,9 +79,9 @@ export class Pursuer implements CarVisualState, CarFxState {
   public get forwardSpeed(): number { return this.v; }
   public get slip(): number { return Math.abs(this.lateralSpeed); }
 
-  /** 0 = far away, 1 = on your door. */
+  /** 0 = at or beyond the comfort gap, 1 = alongside. */
   public get danger(): number {
-    return Math.min(1, Math.max(0, (25 - this.gap) / 22));
+    return Math.min(1, Math.max(0, 1 - this.gap / 18));
   }
 
   public on(listener: (e: PursuerEvent) => void): () => void {
@@ -91,14 +94,14 @@ export class Pursuer implements CarVisualState, CarFxState {
   }
 
   /** Highest speed the road ahead of `s` allows at speed `v`, planned like the race AI does. */
-  public speedLimitAt(s: number, v: number): number {
+  public speedLimitAt(s: number, v: number, grip = 1): number {
     const T = this.t;
     const scan = (v * v) / (2 * T.rivalBrake) + 20;
     let limit = Infinity;
     for (let d = 0; d <= scan; d += 4) {
       const k = Math.abs(this.track.sampleAt(s + d).curvature);
       if (k < 1e-4) continue;
-      const vc = Math.sqrt(T.rivalLatAccel / k);
+      const vc = Math.sqrt((T.rivalLatAccel * grip) / k);
       const allowed = Math.sqrt(vc * vc + 2 * T.rivalBrake * Math.max(0, d - 2));
       if (allowed < limit) limit = allowed;
     }
@@ -106,7 +109,8 @@ export class Pursuer implements CarVisualState, CarFxState {
   }
 
   private cornerLimit(): number {
-    return this.speedLimitAt(this.s, this.v);
+    const angry = this.surgeTime > 0 || this.commitLeft > 0;
+    return this.speedLimitAt(this.s, this.v, angry ? this.t.surgeGrip : 1);
   }
 
   /** The player touched something: the rival smells blood. */
@@ -160,13 +164,25 @@ export class Pursuer implements CarVisualState, CarFxState {
     const kRef = 1 - Math.exp(-dt / T.refTau);
     this.vRef += (Math.max(0, target.forwardSpeed) - this.vRef) * kRef;
 
+    // the leash: never further back than maxGap, whatever the player does
+    if (target.splineS - this.s > T.maxGap) {
+      this.s = target.splineS - T.maxGap;
+      this.v = Math.max(this.v, this.vRef);
+    }
     this.gap = target.splineS - this.s;
     const err = this.gap - this.desiredGap;
     let rate = err > 0 ? closeRate : recedeRate;
-    if (err > T.leashExtra) rate *= 2;
+    if (err > T.leashExtra) rate *= err > 50 ? 3 : 2;
 
     if (this.surgeTime > 0) { this.surgeTime -= dt; if (this.surgeTime <= 0) { this.surgeTime = 0; this.surgeSpeed = 0; } }
-    let vTarget = this.vRef + rate * err + this.surgeSpeed;
+    // once alongside it commits: no backing off for a moment, it pushes through
+    if (this.gap < T.commitGap) this.commitLeft = T.commitTime;
+    else if (this.commitLeft > 0) this.commitLeft -= dt;
+    // a surge is never softened by the urge to fall back: a mistake made while it is already
+    // close is the one that gets you passed
+    const pull = this.surgeTime > 0 ? Math.max(0, rate * err) : rate * err;
+    let vTarget = this.vRef + pull + this.surgeSpeed;
+    if (this.commitLeft > 0) vTarget = Math.max(vTarget, this.vRef + 2.5);
     vTarget = Math.max(T.recedeFloor * this.vRef, Math.min(paceMax, vTarget));
     // it corners hard, but it does corner: the road ahead caps its speed like it caps yours
     vTarget = Math.min(vTarget, this.cornerLimit());
@@ -185,10 +201,21 @@ export class Pursuer implements CarVisualState, CarFxState {
     this.braking = this.v < prevV - 2.5 * dt;
     this.accelF = (this.v - prevV) / dt;
 
-    // move along the road, following the player's recorded line
+    // move along the road, following the player's recorded line; close in and it pulls alongside
     this.s += this.v * dt;
     const id = Math.round(this.s / this.track.spacing);
-    const want = this.line.get(id) ?? this.line.get(id - 1) ?? this.line.get(id + 1) ?? this.lateral;
+    let want = this.line.get(id) ?? this.line.get(id - 1) ?? this.line.get(id + 1) ?? this.lateral;
+    const gapNow = target.splineS - this.s;
+    if (gapNow < T.overtakeGap) {
+      if (this.overtakeSide === 0) {
+        const hw = this.track.sampleAt(target.splineS).width / 2;
+        this.overtakeSide = hw - target.lateral >= target.lateral + hw ? 1 : -1;
+      }
+      const blend = Math.min(1, Math.max(0, (T.overtakeGap - gapNow) / (T.overtakeGap - 2)));
+      want = want * (1 - blend) + (target.lateral + this.overtakeSide * 2.8) * blend;
+    } else if (gapNow > T.overtakeGap + 2) {
+      this.overtakeSide = 0;
+    }
     const prevLateral = this.lateral;
     this.lateral += (want - this.lateral) * (1 - Math.exp(-dt * 4));
     this.placeOnRoad();
@@ -212,7 +239,7 @@ export class Pursuer implements CarVisualState, CarFxState {
     this.gap = target.splineS - this.s;
     if (!this.warned && this.gap < T.closingWarnGap && runTime > T.startGrace) { this.warned = true; this.emit({ type: 'closing', gap: this.gap }); }
     if (this.gap > T.closingWarnGap + 10) this.warned = false;
-    if (this.gap < T.catchDistance && runTime > T.startGrace) {
+    if (this.gap < T.overtakeDistance && runTime > T.startGrace) {
       this.caught = true;
       this.emit({ type: 'caught', gap: this.gap });
     }

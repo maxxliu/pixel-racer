@@ -17,7 +17,7 @@ interface HUDProps {
 }
 
 const MAX_KMH = 230;
-const GAUGE_RANGE = 60; // metres shown on the rival gauge
+const GAUGE_RANGE = 40; // metres shown on the rival gauge
 
 function formatDistance(m: number): string {
   if (m >= 1000) return `${(m / 1000).toFixed(2)} km`;
@@ -140,6 +140,11 @@ function HUDInner({ store, minimap, isMobile, mode, speedLines }: HUDProps) {
       {speedLines && <SpeedLines innerRef={linesRef} />}
       <div className="vignette" />
       {endless && <div ref={dangerRef} className="danger-vignette" />}
+      {endless && snap.mirror && (
+        <div className={`rear-mirror ${isMobile ? 'rear-mirror-touch' : ''}`}>
+          <span className="rear-mirror-label">Rear</span>
+        </div>
+      )}
 
       {/* top-left: lap & position, or score */}
       {endless ? (
@@ -224,7 +229,7 @@ function HUDInner({ store, minimap, isMobile, mode, speedLines }: HUDProps) {
 
       {/* bottom-left: minimap, or the rival gauge */}
       {endless ? (
-        <div ref={gaugeRef} className={`absolute left-3 glass px-4 py-3 ${isMobile ? 'top-[92px] w-40 scale-90 origin-top-left' : 'bottom-3 w-64'}`} style={{ borderWidth: 1 }}>
+        <div ref={gaugeRef} className={`absolute left-3 glass px-4 py-3 ${isMobile ? 'top-[168px] w-40 scale-90 origin-top-left' : 'bottom-3 w-64'}`} style={{ borderWidth: 1 }}>
           <div className="flex items-baseline justify-between">
             <div className="text-label uppercase text-muted">Rival</div>
             <div ref={gapRef} className="text-lg font-bold italic leading-none hud-num text-lime">60 m</div>
