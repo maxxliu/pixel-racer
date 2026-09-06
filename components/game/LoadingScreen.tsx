@@ -1,138 +1,46 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { Kbd } from '@/components/ui/Kbd';
 
 interface LoadingScreenProps {
   progress?: number;
   message?: string;
 }
 
-const RETRO_TIPS = [
-  'PRESS W TO ACCELERATE',
-  'USE A/D TO STEER',
-  'PRESS ESC TO PAUSE',
-  'COMPLETE 3 LAPS TO WIN',
-  'BEAT YOUR BEST LAP TIME',
-  'PRESS R TO RESET CAR',
+const TIPS: React.ReactNode[] = [
+  <>Hold <Kbd>Space</Kbd> in a corner to drift. Release for a boost.</>,
+  <>Longer drifts charge bigger boosts: blue, orange, then purple sparks.</>,
+  <>Press the throttle just as the lights go green for a perfect start.</>,
+  <>Grass is slow. Kerbs are fine. Walls hurt.</>,
+  <><Kbd>C</Kbd> cycles the camera. <Kbd>R</Kbd> respawns at the last checkpoint.</>,
+  <>Every checkpoint must be passed in order for a lap to count.</>,
 ];
 
-export default function LoadingScreen({ progress = 0, message = 'LOADING' }: LoadingScreenProps) {
-  const [loadingDots, setLoadingDots] = useState('');
-  const [tipIndex, setTipIndex] = useState(0);
-
+export default function LoadingScreen({ progress = 0, message = 'Loading' }: LoadingScreenProps) {
+  const [tip, setTip] = useState(0);
   useEffect(() => {
-    const dotsInterval = setInterval(() => {
-      setLoadingDots((dots) => (dots.length >= 3 ? '' : dots + '.'));
-    }, 400);
-    return () => clearInterval(dotsInterval);
+    setTip(Math.floor(Math.random() * TIPS.length));
+    const id = setInterval(() => setTip((t) => (t + 1) % TIPS.length), 2600);
+    return () => clearInterval(id);
   }, []);
-
-  useEffect(() => {
-    const tipInterval = setInterval(() => {
-      setTipIndex((i) => (i + 1) % RETRO_TIPS.length);
-    }, 2000);
-    return () => clearInterval(tipInterval);
-  }, []);
-
-  // Calculate number of segments filled (out of 20)
-  const totalSegments = 20;
-  const filledSegments = Math.floor((progress / 100) * totalSegments);
 
   return (
-    <div className="loading-screen relative">
-      {/* Scanlines */}
-      <div className="absolute inset-0 scanlines" />
-
-      {/* CRT vignette */}
-      <div className="absolute inset-0 crt-vignette" />
-
-      {/* Pixel grid background */}
-      <div className="absolute inset-0 pixel-grid-bg opacity-20" />
-
-      {/* Content */}
-      <div className="relative z-10 flex flex-col items-center">
-        {/* Title */}
-        <h1 className="font-pixel text-3xl md:text-5xl text-pixel-cyan pixel-text-shadow mb-8 animate-pixel-pulse">
-          PIXEL RACER
-        </h1>
-
-        {/* Pixel art loading bar */}
-        <div className="mb-6">
-          <div className="pixel-panel p-4">
-            <div className="flex gap-1">
-              {Array.from({ length: totalSegments }).map((_, i) => {
-                let bgColor = 'bg-pixel-mid';
-                if (i < filledSegments) {
-                  if (i < totalSegments * 0.5) {
-                    bgColor = 'bg-pixel-green';
-                  } else if (i < totalSegments * 0.8) {
-                    bgColor = 'bg-pixel-yellow';
-                  } else {
-                    bgColor = 'bg-pixel-red';
-                  }
-                }
-                return (
-                  <div
-                    key={i}
-                    className={`w-4 h-6 ${bgColor} transition-colors duration-100`}
-                  />
-                );
-              })}
-            </div>
-          </div>
+    <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-ink px-6 text-center" role="status" aria-live="polite">
+      <div className="mb-8 font-display text-display-l italic">
+        <span className="text-coral">PIXEL</span>
+        <span className="text-cream">RACER</span>
+      </div>
+      <div className="w-full max-w-sm">
+        <div className="h-3 overflow-hidden rounded-full bg-cream/10">
+          <div className="h-full rounded-full bg-gradient-to-r from-coral via-sun to-lime transition-[width] duration-200" style={{ width: `${Math.max(4, Math.min(100, progress))}%` }} />
         </div>
-
-        {/* Progress percentage */}
-        <div className="font-pixel text-xl text-pixel-white mb-4">
-          {Math.round(progress)}%
-        </div>
-
-        {/* Loading message with dots */}
-        <div className="font-pixel text-sm text-pixel-orange mb-8">
-          {message.toUpperCase()}{loadingDots}
-        </div>
-
-        {/* Animated pixel car */}
-        <div className="mb-8 animate-bounce">
-          <PixelCarLoading />
-        </div>
-
-        {/* Retro tip */}
-        <div className="pixel-panel px-6 py-3">
-          <div className="font-pixel text-[10px] text-pixel-cyan">
-            TIP: {RETRO_TIPS[tipIndex]}
-          </div>
-        </div>
-
-        {/* Bottom credits */}
-        <div className="absolute bottom-8 font-pixel text-[8px] text-pixel-gray animate-blink">
-          PRESS START
+        <div className="mt-3 flex justify-between font-display text-xs uppercase tracking-widest text-muted">
+          <span>{message}</span>
+          <span className="hud-num">{Math.round(progress)}%</span>
         </div>
       </div>
+      <p className="mt-10 max-w-md text-sm text-muted">{TIPS[tip]}</p>
     </div>
-  );
-}
-
-function PixelCarLoading() {
-  return (
-    <svg width="64" height="32" viewBox="0 0 64 32" style={{ imageRendering: 'pixelated' }}>
-      {/* Car body */}
-      <rect x="8" y="12" width="48" height="12" fill="#ff004d" />
-      <rect x="16" y="6" width="28" height="6" fill="#ff004d" />
-      {/* Windows */}
-      <rect x="18" y="7" width="10" height="4" fill="#29adff" />
-      <rect x="30" y="7" width="10" height="4" fill="#29adff" />
-      {/* Wheels */}
-      <rect x="12" y="22" width="8" height="8" fill="#1a1a2e" />
-      <rect x="44" y="22" width="8" height="8" fill="#1a1a2e" />
-      {/* Wheel highlights */}
-      <rect x="14" y="24" width="3" height="3" fill="#4a4a6a" />
-      <rect x="46" y="24" width="3" height="3" fill="#4a4a6a" />
-      {/* Headlights */}
-      <rect x="54" y="14" width="4" height="4" fill="#ffec27" />
-      <rect x="54" y="19" width="4" height="4" fill="#ffec27" />
-      {/* Exhaust */}
-      <rect x="4" y="16" width="4" height="3" fill="#4a4a6a" />
-    </svg>
   );
 }

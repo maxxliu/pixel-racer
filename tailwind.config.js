@@ -1,63 +1,31 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: [
-    './app/**/*.{js,ts,jsx,tsx,mdx}',
-    './components/**/*.{js,ts,jsx,tsx,mdx}',
-  ],
+  content: ['./app/**/*.{js,ts,jsx,tsx,mdx}', './components/**/*.{js,ts,jsx,tsx,mdx}'],
   theme: {
     extend: {
       colors: {
-        // F1 Professional Racing Theme
-        primary: '#dc2626',
-        secondary: '#2563eb',
-        dark: '#171717',
-        // Pixel palette - F1 themed
-        pixel: {
-          black: '#171717',   // Carbon black
-          dark: '#262626',    // Charcoal
-          mid: '#404040',     // Slate
-          light: '#737373',   // Inactive
-          red: '#dc2626',     // Racing red
-          orange: '#ea580c',  // McLaren orange
-          yellow: '#fbbf24',  // Caution yellow
-          green: '#0d9488',   // Aston Martin teal
-          cyan: '#525252',    // Neutral
-          blue: '#2563eb',    // Williams blue
-          purple: '#525252',  // Neutral
-          pink: '#dc2626',    // Same as red
-          white: '#ffffff',   // Pure white
-          gray: '#a3a3a3',    // Chrome silver
-        },
+        ink: { DEFAULT: '#0f0a1e', 2: '#160f2b' },
+        surface: '#1a1030',
+        coral: { DEFAULT: '#ff5c4d', deep: '#d63f31' },
+        lime: '#c8ff3d',
+        sun: '#ffd166',
+        pink: '#ff7ab8',
+        sky: '#3fb6ff',
+        cream: '#fff7ef',
+        muted: '#b7a9c9',
       },
       fontFamily: {
-        pixel: ['"Press Start 2P"', 'monospace'],
-        'pixel-body': ['"VT323"', 'monospace'],
+        display: ['"Chakra Petch"', '"Segoe UI"', 'system-ui', 'sans-serif'],
+        body: ['Inter', '"Segoe UI"', 'system-ui', 'sans-serif'],
       },
-      boxShadow: {
-        'pixel': '4px 4px 0 #171717',
-        'pixel-sm': '2px 2px 0 #171717',
-        'pixel-lg': '6px 6px 0 #171717',
+      fontSize: {
+        'display-xl': ['clamp(3rem, 9vw, 7rem)', { lineHeight: '0.9', letterSpacing: '-0.02em' }],
+        'display-l': ['clamp(2rem, 5vw, 3.5rem)', { lineHeight: '1', letterSpacing: '-0.01em' }],
+        'display-m': ['clamp(1.4rem, 3vw, 2rem)', { lineHeight: '1.05' }],
+        label: ['0.72rem', { lineHeight: '1', letterSpacing: '0.14em' }],
       },
-      animation: {
-        'blink': 'blink 1s infinite',
-        'flicker': 'flicker 0.1s infinite',
-        'pixel-pulse': 'pixel-pulse 2s ease-in-out infinite',
-      },
-      keyframes: {
-        blink: {
-          '0%, 49%': { opacity: '1' },
-          '50%, 100%': { opacity: '0' },
-        },
-        flicker: {
-          '0%, 100%': { opacity: '1' },
-          '50%': { opacity: '0.8' },
-          '75%': { opacity: '0.9' },
-        },
-        'pixel-pulse': {
-          '0%, 100%': { textShadow: '0 0 10px currentColor, 0 0 20px currentColor' },
-          '50%': { textShadow: '0 0 20px currentColor, 0 0 40px currentColor' },
-        },
-      },
+      borderRadius: { lg: '14px', xl: '20px' },
+      boxShadow: { glow: '0 0 0 1px rgba(255,247,239,0.08), 0 10px 40px rgba(0,0,0,0.35)' },
     },
   },
   plugins: [],

@@ -1,898 +1,471 @@
 import * as THREE from 'three';
-import * as CANNON from 'cannon-es';
 import { Engine } from './Engine';
 import { GameLoop } from './GameLoop';
+import { TrackSpline, DEFAULT_WAYPOINTS, type MinimapData } from './TrackSpline';
+import { ArcadeCar } from './ArcadeCar';
+import { RaceDirector, type Racer, type Standing, type RaceEvent } from './RaceDirector';
+import { GameStore } from './GameStore';
+import { CameraRig } from './CameraRig';
+import { Environment } from './Environment';
+import { TrackMeshBuilder } from './TrackMeshBuilder';
+import { buildCarMesh, updateCarVisual, type CarVisual } from './CarMesh';
+import { ParticleSystem, SkidMarks, CarEffects } from './Effects';
+import { AIDriver, DIFFICULTY_SCALE, type AIPersonality } from './ai/AIDriver';
+import { PALETTE } from './palette';
 import { InputManager } from '@/lib/input/InputManager';
-import { TrackBuilder, TrackBuilderOptions, TrackWaypoint, MinimapData } from './TrackBuilder';
-export type { MinimapData } from './TrackBuilder';
-export type { TrackWaypoint } from './TrackBuilder';
-import { SkidMarkManager } from './SkidMarkManager';
-import { AIRacer } from './AIRacer';
-import { VehicleState } from '@/lib/shared/physics/VehiclePhysics';
-import { AIPersonality } from '@/lib/shared/game/AIController';
 import { HapticFeedback } from '@/lib/input/HapticFeedback';
+import { AudioEngine } from '@/lib/audio/AudioEngine';
+import { loadSettings, saveSettings, subscribeSettings, type GameSettings } from '@/lib/settings';
+import type { CustomTrackData, GameMode } from './types';
 
-export type GameMode = 'time-trial' | 'race';
+export type { MinimapData } from './TrackSpline';
+export type { CustomTrackData, GameMode } from './types';
 
 export interface RaceResults {
+  mode: GameMode;
+  standings: Standing[];
+  position: number;
   totalTime: number;
-  bestLapTime: number;
+  bestLap: number;
   lapTimes: number[];
   totalLaps: number;
-  position?: number;
-}
-
-export interface CustomTrackData {
-  waypoints: TrackWaypoint[];
-  startPosition: { x: number; z: number; rotation: number };
-  id?: string;
+  trackLength: number;
 }
 
 export interface GameOptions {
-  gameMode?: GameMode;
+  mode: GameMode;
   customTrack?: CustomTrackData;
-  onProgressUpdate?: (progress: number, message: string) => void;
-  onGameStateUpdate?: (state: GameState) => void;
+  /** Development-only override. */
+  lapsOverride?: number;
+  onProgress?: (progress: number, message: string) => void;
   onPause?: () => void;
-  onRaceComplete?: (results: RaceResults) => void;
+  onFinish?: (results: RaceResults) => void;
 }
 
-export interface GameState {
-  speed: number;
-  rpm: number;
-  gear: number;
-  lap: number;
-  totalLaps: number;
-  position: number;
-  totalRacers: number;
-  lapTime: number;
-  bestLapTime: number;
-  carX: number;
-  carZ: number;
-  carRotation: number;
-}
-
-// F1 Professional Racing color palette
-const PIXEL_COLORS = {
-  black: 0x171717,    // Carbon black - player car body
-  dark: 0x262626,     // Charcoal - wheels
-  mid: 0x404040,      // Slate
-  light: 0x737373,    // Inactive
-  red: 0xdc2626,      // Racing red - player accent
-  orange: 0xea580c,   // McLaren orange
-  yellow: 0xfbbf24,   // Headlights
-  green: 0x0d9488,    // Teal
-  cyan: 0x525252,     // Neutral
-  blue: 0x2563eb,     // Williams blue
-  purple: 0x525252,   // Neutral
-  pink: 0xdc2626,     // Same as red
-  white: 0xffffff,    // Pure white
-  gray: 0xa3a3a3,     // Chrome silver
+const PERSONALITIES: Record<GameSettings['difficulty'], AIPersonality[]> = {
+  easy: ['balanced', 'defensive', 'rookie', 'rookie', 'defensive'],
+  normal: ['aggressive', 'balanced', 'defensive', 'rookie', 'balanced'],
+  hard: ['aggressive', 'aggressive', 'balanced', 'balanced', 'defensive'],
 };
 
+interface RacerBundle {
+  racer: Racer;
+  car: ArcadeCar;
+  visual: CarVisual;
+  fx: CarEffects;
+  ai: AIDriver | null;
+}
+
 export class Game {
-  private container: HTMLElement;
-  private options: GameOptions;
-  private gameMode: GameMode;
-
+  public readonly store: GameStore;
+  public readonly audio = new AudioEngine();
   private engine!: Engine;
-  private gameLoop!: GameLoop;
-  private inputManager!: InputManager;
+  private loop!: GameLoop;
+  private input!: InputManager;
+  private spline!: TrackSpline;
+  private director!: RaceDirector;
+  private camera!: CameraRig;
+  private environment!: Environment;
+  private trackMesh!: TrackMeshBuilder;
+  private particles!: ParticleSystem;
+  private skids!: SkidMarks;
+  private bundles: RacerBundle[] = [];
+  private player!: RacerBundle;
+  private settings: GameSettings;
+  private unsubscribeSettings: (() => void) | null = null;
+  private unsubscribeDirector: (() => void) | null = null;
+  private paused = false;
+  private disposed = false;
+  private initialised = false;
+  private finished = false;
+  private time = 0;
+  private lastColdKey = '';
+  private driftHintShown = false;
+  private autopilot: AIDriver | null = null;
+  private readonly lapsTotal: number;
 
-  // Physics
-  private world!: CANNON.World;
-  private carBody!: CANNON.Body;
-  private carMaterial!: CANNON.Material;
-  private barrierMaterial!: CANNON.Material;
-
-  // Track
-  private trackBuilder!: TrackBuilder;
-  private waypoints: TrackWaypoint[] = [];
-  private startPosition = { x: 0, z: 0, rotation: 0 };
-
-  // Visuals
-  private carMesh!: THREE.Group;
-  private wheelMeshes: THREE.Mesh[] = [];
-  private skidMarkManager!: SkidMarkManager;
-
-  // AI Racers
-  private aiRacers: AIRacer[] = [];
-  private readonly AI_COUNT = 3;
-
-  // Camera smoothing
-  private cameraTarget = new THREE.Vector3();
-  private cameraPosition = new THREE.Vector3();
-
-  private isPaused = false;
-  private isInitialized = false;
-  private gameState: GameState;
-
-  // Car physics
-  private carSpeed = 0;
-  private carRotation = 0;
-  private readonly maxSpeed = 55;
-  private readonly acceleration = 20;
-  private readonly brakeForce = 30;
-  private readonly friction = 5;
-  private readonly turnSpeed = 2.5;
-
-  // Lap tracking
-  private lapStartTime = 0;
-  private raceStartTime = 0;
-  private lastZ = 0;
-  private crossedFinishLine = false;
-  private lapTimes: number[] = [];
-  private raceComplete = false;
-  private currentLap = 1;
-  private bestLapTime = 0;
-  private racePosition = 1;
-  private raceStarted = false; // Timer doesn't start until player moves
-
-  // Throttle UI updates
-  private lastUIUpdate = 0;
-  private readonly UI_UPDATE_INTERVAL = 16;
-
-  // Skid detection
-  private lastSkidTime = 0;
-  private readonly SKID_INTERVAL = 50;
-
-  constructor(container: HTMLElement, options: GameOptions = {}) {
-    this.container = container;
-    this.options = options;
-    this.gameMode = options.gameMode || 'time-trial';
-
-    const totalRacers = this.gameMode === 'race' ? this.AI_COUNT + 1 : 1;
-    this.gameState = {
-      speed: 0,
-      rpm: 800,
-      gear: 1,
-      lap: 1,
-      totalLaps: 3,
-      position: 1,
-      totalRacers,
-      lapTime: 0,
-      bestLapTime: 0,
-      carX: 0,
-      carZ: 0,
-      carRotation: 0,
-    };
+  constructor(private readonly container: HTMLElement, private readonly options: GameOptions) {
+    this.settings = loadSettings();
+    const isDev = process.env.NODE_ENV !== 'production';
+    this.lapsTotal = isDev && options.lapsOverride ? options.lapsOverride : this.settings.laps;
+    const aiCount = options.mode === 'race' ? this.settings.aiCount : 0;
+    this.store = new GameStore(this.lapsTotal, aiCount + 1);
   }
 
   public async init(): Promise<void> {
-    try {
-      this.reportProgress(0, 'INITIALIZING...');
+    const report = (p: number, m: string) => this.options.onProgress?.(p, m);
+    report(5, 'Warming up');
+    await nextFrame();
+    if (this.disposed) return;
 
-      // Initialize Three.js
-      this.engine = new Engine({
-        container: this.container,
-        antialias: false,
-      });
-      this.reportProgress(15, 'ENGINE READY');
+    const waypoints = this.options.customTrack?.waypoints ?? DEFAULT_WAYPOINTS;
+    this.spline = new TrackSpline(waypoints, this.options.customTrack?.startPosition);
+    report(20, 'Laying asphalt');
+    await nextFrame();
+    if (this.disposed) return;
 
-      // Initialize physics
-      this.initPhysics();
-      this.reportProgress(30, 'PHYSICS READY');
+    this.engine = new Engine({ container: this.container, quality: this.settings.quality });
+    this.trackMesh = new TrackMeshBuilder(this.spline);
+    this.engine.scene.add(this.trackMesh.group);
+    report(45, 'Painting the sunset');
+    await nextFrame();
+    if (this.disposed) return;
 
-      // Build track (custom or default)
-      const trackBuilderOptions: TrackBuilderOptions = {};
-      if (this.options.customTrack) {
-        trackBuilderOptions.customWaypoints = this.options.customTrack.waypoints;
-        trackBuilderOptions.customStartPosition = this.options.customTrack.startPosition;
-      }
+    this.environment = new Environment(this.spline, this.settings.quality);
+    this.engine.scene.add(this.environment.group);
+    this.particles = new ParticleSystem(this.engine.scene);
+    this.skids = new SkidMarks(this.engine.scene);
+    report(70, 'Fuelling cars');
+    await nextFrame();
+    if (this.disposed) return;
 
-      this.trackBuilder = new TrackBuilder(this.engine.scene, this.world, trackBuilderOptions);
-      const trackData = this.trackBuilder.build();
-      this.waypoints = trackData.waypoints;
-      this.startPosition = this.trackBuilder.getStartPosition();
-      this.barrierMaterial = this.trackBuilder.getBarrierMaterial();
-      this.reportProgress(50, 'TRACK READY');
+    this.director = new RaceDirector(this.spline, { laps: this.lapsTotal });
+    this.createRacers();
+    this.unsubscribeDirector = this.director.on((e) => this.onRaceEvent(e));
 
-      // Setup collision materials
-      this.setupCollisionMaterials();
+    this.input = new InputManager();
+    this.camera = new CameraRig(this.engine.camera, this.settings.cameraMode);
+    this.camera.snapTo(this.player.car);
+    this.audio.setLevels(this.settings.audio);
+    this.unsubscribeSettings = subscribeSettings(() => {
+      this.settings = loadSettings();
+      this.audio.setLevels(this.settings.audio);
+      HapticFeedback.setEnabled(this.settings.haptics);
+    });
+    HapticFeedback.setEnabled(this.settings.haptics);
 
-      // Create player car
-      this.createVoxelCar();
-      this.reportProgress(65, 'CAR READY');
+    this.loop = new GameLoop(1 / 60, 4);
+    this.loop.onUpdate((dt) => this.update(dt));
+    this.loop.onRender((alpha, dt) => this.render(alpha, dt));
+    report(100, 'Lights on');
+    await nextFrame();
+    if (this.disposed) return;
+    this.initialised = true;
+    this.loop.start();
+    this.audio.setEngineRunning(true);
+    this.store.emit();
+  }
 
-      // Create skid mark manager
-      this.skidMarkManager = new SkidMarkManager(this.engine.scene);
+  private createRacers(): void {
+    const aiCount = this.options.mode === 'race' ? this.settings.aiCount : 0;
+    const slots = aiCount + 1;
+    // Player starts at the back for a race, on pole in a time trial.
+    const playerSlot = aiCount > 0 ? slots - 1 : 0;
+    const personalities = PERSONALITIES[this.settings.difficulty];
+    const diff = DIFFICULTY_SCALE[this.settings.difficulty];
+    let aiIndex = 0;
+    for (let i = 0; i < slots; i++) {
+      const isPlayer = i === playerSlot;
+      const car = new ArcadeCar(this.spline);
+      const slot = this.spline.gridSlot(i);
+      car.place(slot.x, slot.z, slot.rotation);
+      car.isPlayer = isPlayer;
+      const color = isPlayer ? PALETTE.player : PALETTE.ai[aiIndex % PALETTE.ai.length];
+      const personality = personalities[aiIndex % personalities.length];
+      const ai = isPlayer ? null : new AIDriver(car, this.spline, personality, diff);
+      const name = isPlayer ? 'YOU' : ai!.profile.name;
+      const racer = this.director.addRacer(car, name, color, isPlayer);
+      const visual = buildCarMesh(color);
+      this.engine.scene.add(visual.group);
+      const fx = new CarEffects(this.particles, this.skids, `c${i}`);
+      const bundle: RacerBundle = { racer, car, visual, fx, ai };
+      this.bundles.push(bundle);
+      if (isPlayer) this.player = bundle;
+      else aiIndex++;
+      car.onBoost = (tier) => {
+        if (isPlayer) { this.audio.boost(tier); HapticFeedback.drift(); this.camera.addShake(0.15); }
+      };
+    }
+    // AI hard-cap so the field stays close on lap 1
+    this.director.racers.forEach((r, i) => { r.position = i + 1; });
+  }
 
-      // Create AI racers if in race mode
-      if (this.gameMode === 'race') {
-        this.createAIRacers();
-      }
-      this.reportProgress(80, 'AI READY');
-
-      // Initialize input
-      this.inputManager = new InputManager();
-
-      // Initialize game loop
-      this.gameLoop = new GameLoop();
-      this.gameLoop.onUpdate((dt) => this.update(dt));
-      this.gameLoop.onRender(() => this.render());
-
-      // Initialize lap tracking - timer starts when player first moves
-      this.lapStartTime = 0;
-      this.raceStartTime = 0;
-      this.raceStarted = false;
-      // Initialize lastZ to a positive value so car must complete a full lap first
-      // (lastZ is repurposed as forward distance from finish line)
-      this.lastZ = 5;
-      this.lapTimes = [];
-      this.raceComplete = false;
-
-      // Start
-      this.gameLoop.start();
-      this.isInitialized = true;
-      this.reportProgress(100, 'READY!');
-    } catch (error) {
-      console.error('Failed to initialize game:', error);
-      throw error;
+  private onRaceEvent(e: RaceEvent): void {
+    const s = this.store;
+    switch (e.type) {
+      case 'countdown':
+        s.state.countdown = e.value;
+        this.audio.countdownBeep(false);
+        s.emit();
+        break;
+      case 'go':
+        s.state.countdown = null;
+        s.state.go = true;
+        this.audio.countdownBeep(true);
+        s.emit();
+        break;
+      case 'startBoost':
+        if (e.racer.isPlayer) s.notify('PERFECT START', 'good', 1400);
+        break;
+      case 'lap':
+        if (!e.racer.isPlayer) break;
+        if (e.racer.finished) break;
+        if (e.isBest && e.racer.lapTimes.length > 1) s.notify('NEW BEST LAP', 'good', 1800, formatDeltaShort(e.delta));
+        else if (e.finalLap) s.notify('FINAL LAP', 'big', 1800);
+        else s.notify(`LAP ${e.racer.lap}`, 'info', 1400, e.racer.lapTimes.length > 1 ? formatDeltaShort(e.delta) : undefined);
+        this.audio.lap(e.isBest && e.racer.lapTimes.length > 1);
+        HapticFeedback.checkpoint();
+        break;
+      case 'invalidLap':
+        if (e.racer.isPlayer) s.notify('LAP NOT COUNTED', 'bad', 2200, 'Missed a checkpoint');
+        break;
+      case 'wrongWay':
+        if (e.racer.isPlayer) { s.state.wrongWay = e.active; if (e.active) this.audio.wrongWay(); s.emit(); }
+        break;
+      case 'position':
+        if (e.racer.isPlayer && this.director.phase === 'racing') {
+          s.notify(e.to < e.from ? `P${e.to}` : `P${e.to}`, e.to < e.from ? 'good' : 'bad', 900, e.to < e.from ? 'Overtake!' : 'Lost a place');
+        }
+        break;
+      case 'respawn':
+        if (e.racer.isPlayer) { this.audio.respawn(); this.skids.lift('c0-0'); this.skids.lift('c0-1'); this.camera.snapTo(e.racer.car); }
+        break;
+      case 'finish':
+        this.finish(e.standings);
+        break;
+      default:
+        break;
     }
   }
 
-  private reportProgress(progress: number, message: string): void {
-    this.options.onProgressUpdate?.(progress, message);
+  private finish(standings: Standing[]): void {
+    if (this.finished) return;
+    this.finished = true;
+    const r = this.player.racer;
+    const win = r.position === 1;
+    this.audio.finish(win);
+    HapticFeedback.raceComplete();
+    this.player.fx.burst(this.player.car.x, this.player.car.z);
+    this.store.state.phase = 'finished';
+    this.store.emit();
+    const results: RaceResults = {
+      mode: this.options.mode,
+      standings,
+      position: r.position,
+      totalTime: r.finishTime,
+      bestLap: r.bestLap,
+      lapTimes: r.lapTimes,
+      totalLaps: this.lapsTotal,
+      trackLength: this.spline.length,
+    };
+    window.setTimeout(() => { if (!this.disposed) this.options.onFinish?.(results); }, 900);
   }
 
-  private initPhysics(): void {
-    this.world = new CANNON.World();
-    this.world.gravity.set(0, -20, 0);
-    this.world.broadphase = new CANNON.SAPBroadphase(this.world);
-    (this.world.solver as CANNON.GSSolver).iterations = 20;
+  private update(dt: number): void {
+    if (this.paused || this.disposed) return;
+    this.time += dt;
+    const input = this.input.update();
 
-    // Create materials
-    const groundMaterial = new CANNON.Material('ground');
-    this.carMaterial = new CANNON.Material('car');
-
-    // Ground contact
-    const carGroundContact = new CANNON.ContactMaterial(groundMaterial, this.carMaterial, {
-      friction: 0.8,
-      restitution: 0.0,
-    });
-    this.world.addContactMaterial(carGroundContact);
-    this.world.defaultContactMaterial.friction = 0.5;
-    this.world.defaultContactMaterial.restitution = 0.0;
-
-    // Ground body
-    const groundShape = new CANNON.Box(new CANNON.Vec3(500, 0.5, 500));
-    const groundBody = new CANNON.Body({
-      type: CANNON.Body.STATIC,
-      shape: groundShape,
-      material: groundMaterial,
-    });
-    groundBody.position.set(0, -0.5, 0);
-    this.world.addBody(groundBody);
-  }
-
-  private setupCollisionMaterials(): void {
-    // Barrier-car contact
-    const barrierCarContact = new CANNON.ContactMaterial(this.barrierMaterial, this.carMaterial, {
-      friction: 0.5,
-      restitution: 0.1,
-    });
-    this.world.addContactMaterial(barrierCarContact);
-
-    // Car-car contact (for AI collisions)
-    const carCarContact = new CANNON.ContactMaterial(this.carMaterial, this.carMaterial, {
-      friction: 0.2,
-      restitution: 0.6,
-    });
-    this.world.addContactMaterial(carCarContact);
-
-    // Listen for collisions
-    this.world.addEventListener('beginContact', (event: { bodyA: CANNON.Body; bodyB: CANNON.Body }) => {
-      // Check if player car hit a barrier
-      if (
-        (event.bodyA === this.carBody || event.bodyB === this.carBody) &&
-        (event.bodyA.material === this.barrierMaterial || event.bodyB.material === this.barrierMaterial)
-      ) {
-        // Reduce speed on barrier collision
-        this.carSpeed *= 0.7;
-        HapticFeedback.collision();
-      }
-    });
-  }
-
-  private createVoxelCar(): void {
-    // Physics body
-    const carShape = new CANNON.Box(new CANNON.Vec3(1, 0.4, 2));
-    this.carBody = new CANNON.Body({
-      mass: 500,
-      shape: carShape,
-      material: this.carMaterial,
-      linearDamping: 0.5,
-      angularDamping: 0.8,
-    });
-
-    this.carBody.position.set(this.startPosition.x, 0.75, this.startPosition.z);
-    this.carRotation = this.startPosition.rotation;
-    this.world.addBody(this.carBody);
-
-    // Create blocky voxel car group
-    this.carMesh = new THREE.Group();
-    this.wheelMeshes = [];
-
-    // Body - main block (carbon black)
-    const bodyGeo = new THREE.BoxGeometry(2, 0.6, 4);
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: PIXEL_COLORS.black,
-      flatShading: true,
-      roughness: 1.0,
-      metalness: 0.0,
-    });
-    const body = new THREE.Mesh(bodyGeo, bodyMat);
-    body.position.y = 0.3;
-    body.castShadow = true;
-    this.carMesh.add(body);
-
-    // Red racing stripe on top
-    const stripeGeo = new THREE.BoxGeometry(0.4, 0.02, 3.8);
-    const stripeMat = new THREE.MeshStandardMaterial({
-      color: PIXEL_COLORS.red,
-      flatShading: true,
-      roughness: 1.0,
-      metalness: 0.0,
-    });
-    const stripe = new THREE.Mesh(stripeGeo, stripeMat);
-    stripe.position.set(0, 0.61, 0);
-    this.carMesh.add(stripe);
-
-    // Cabin (dark gray)
-    const cabinGeo = new THREE.BoxGeometry(1.6, 0.5, 1.8);
-    const cabinMat = new THREE.MeshStandardMaterial({
-      color: PIXEL_COLORS.dark,
-      flatShading: true,
-      roughness: 1.0,
-      metalness: 0.0,
-    });
-    const cabin = new THREE.Mesh(cabinGeo, cabinMat);
-    cabin.position.set(0, 0.75, -0.3);
-    cabin.castShadow = true;
-    this.carMesh.add(cabin);
-
-    // Wheels (dark charcoal)
-    const wheelGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-    const wheelMat = new THREE.MeshStandardMaterial({
-      color: PIXEL_COLORS.dark,
-      flatShading: true,
-      roughness: 1.0,
-      metalness: 0.0,
-    });
-
-    const wheelPositions = [
-      { x: -1.1, y: -0.2, z: 1.3 },
-      { x: 1.1, y: -0.2, z: 1.3 },
-      { x: -1.1, y: -0.2, z: -1.3 },
-      { x: 1.1, y: -0.2, z: -1.3 },
-    ];
-
-    wheelPositions.forEach((pos) => {
-      const wheel = new THREE.Mesh(wheelGeo, wheelMat);
-      wheel.position.set(pos.x, pos.y, pos.z);
-      wheel.castShadow = true;
-      this.carMesh.add(wheel);
-      this.wheelMeshes.push(wheel);
-    });
-
-    // Headlights (warm yellow)
-    const headlightGeo = new THREE.BoxGeometry(0.3, 0.3, 0.1);
-    const headlightMat = new THREE.MeshStandardMaterial({
-      color: PIXEL_COLORS.yellow,
-      flatShading: true,
-      roughness: 1.0,
-      metalness: 0.0,
-    });
-
-    const hl1 = new THREE.Mesh(headlightGeo, headlightMat);
-    hl1.position.set(-0.6, 0.3, 2);
-    this.carMesh.add(hl1);
-
-    const hl2 = new THREE.Mesh(headlightGeo, headlightMat);
-    hl2.position.set(0.6, 0.3, 2);
-    this.carMesh.add(hl2);
-
-    // Taillights (red to match stripe)
-    const taillightGeo = new THREE.BoxGeometry(0.3, 0.2, 0.1);
-    const taillightMat = new THREE.MeshStandardMaterial({
-      color: PIXEL_COLORS.red,
-      flatShading: true,
-      roughness: 1.0,
-      metalness: 0.0,
-    });
-
-    const tl1 = new THREE.Mesh(taillightGeo, taillightMat);
-    tl1.position.set(-0.6, 0.35, -2);
-    this.carMesh.add(tl1);
-
-    const tl2 = new THREE.Mesh(taillightGeo, taillightMat);
-    tl2.position.set(0.6, 0.35, -2);
-    this.carMesh.add(tl2);
-
-    this.engine.scene.add(this.carMesh);
-
-    // Initialize camera
-    this.cameraPosition.set(this.startPosition.x, 8, this.startPosition.z - 15);
-    this.cameraTarget.set(this.startPosition.x, 0, this.startPosition.z);
-    this.engine.camera.position.copy(this.cameraPosition);
-    this.engine.camera.lookAt(this.cameraTarget);
-  }
-
-  private createAIRacers(): void {
-    const personalities: AIPersonality[] = ['aggressive', 'balanced', 'defensive'];
-    const aiStartPositions = this.trackBuilder.getAIStartPositions(this.AI_COUNT);
-
-    for (let i = 0; i < this.AI_COUNT; i++) {
-      const racer = new AIRacer(
-        this.engine.scene,
-        this.world,
-        this.waypoints,
-        aiStartPositions[i],
-        personalities[i],
-        i,
-        this.carMaterial,
-        this.startPosition // Pass actual track start position for lap detection
-      );
-      this.aiRacers.push(racer);
-    }
-  }
-
-  private update(deltaTime: number): void {
-    if (this.isPaused || this.raceComplete) return;
-
-    const input = this.inputManager.update();
-
-    // Handle pause
-    if (input.pause) {
+    if (input.pause && !this.finished) {
       this.pause();
       this.options.onPause?.();
       return;
     }
-
-    // Reset car
-    if (input.resetVehicle) {
-      this.resetCar();
+    if (input.mute) {
+      saveSettings((s) => ({ ...s, audio: { ...s.audio, muted: !s.audio.muted } }));
+      this.store.notify(this.settings.audio.muted ? 'SOUND ON' : 'SOUND OFF', 'info', 900);
+    }
+    if (input.cameraToggle) {
+      const mode = this.camera.cycle();
+      saveSettings({ cameraMode: mode });
+      this.store.notify(`CAMERA: ${mode.toUpperCase()}`, 'info', 900);
+    }
+    if (input.respawn && !this.finished && this.director.phase === 'racing') {
+      this.director.respawn(this.player.racer);
     }
 
-    // Update player car physics
-    this.updatePlayerCar(deltaTime, input);
-
-    // Update AI racers
-    this.updateAIRacers(deltaTime);
-
-    // Step physics world with higher substep count for better collision detection
-    this.world.step(1 / 120, deltaTime, 10);
-
-    // Force car to correct height after physics
-    this.carBody.position.y = 0.75;
-
-    // Detect and add skid marks
-    this.handleSkidMarks(input, deltaTime);
-
-    // Lap detection
-    this.detectLapCrossing();
-
-    // Update race position
-    this.updateRacePosition();
-
-    // Update UI
-    this.updateGameState();
-  }
-
-  private updatePlayerCar(deltaTime: number, input: { throttle: number; steering: number }): void {
-    // Start the race timer when player first provides throttle input
-    if (!this.raceStarted && input.throttle > 0) {
-      this.raceStarted = true;
-      this.lapStartTime = performance.now();
-      this.raceStartTime = performance.now();
+    const frozen = this.director.isFrozen;
+    if (frozen) {
+      const elapsed = 3 - this.director.countdownRemaining;
+      this.director.noteThrottle(this.player.racer, input.throttle, elapsed);
     }
 
-    // Acceleration
-    if (input.throttle > 0) {
-      this.carSpeed = Math.min(this.carSpeed + this.acceleration * deltaTime, this.maxSpeed);
-    } else if (input.throttle < 0) {
-      this.carSpeed = Math.max(this.carSpeed - this.brakeForce * deltaTime, -15);
-    } else {
-      if (this.carSpeed > 0) {
-        this.carSpeed = Math.max(this.carSpeed - this.friction * deltaTime, 0);
-      } else if (this.carSpeed < 0) {
-        this.carSpeed = Math.min(this.carSpeed + this.friction * deltaTime, 0);
-      }
+    // player
+    const cars = this.bundles.map((b) => b.car);
+    const playerInput = this.finished
+      ? { throttle: 0, steer: 0, brake: true, handbrake: false }
+      : this.autopilot
+        ? this.autopilot.think(dt, { others: cars.filter((c) => c !== this.player.car), gapToPlayer: 0 })
+        : { throttle: input.throttle, steer: input.steering, brake: input.brake, handbrake: input.handbrake };
+    this.player.car.step(dt, playerInput, frozen);
+
+    // AI
+    for (const b of this.bundles) {
+      if (!b.ai) continue;
+      const others = cars.filter((c) => c !== b.car);
+      const gap = this.player.racer.progress - b.racer.progress;
+      const ctx = { others, gapToPlayer: this.finished ? 0 : gap };
+      const ai = b.ai.think(dt, ctx);
+      b.car.step(dt, ai, frozen);
+    }
+    // car-car
+    for (let i = 0; i < cars.length; i++) {
+      for (let j = i + 1; j < cars.length; j++) ArcadeCar.collide(cars[i], cars[j]);
     }
 
-    // Steering
-    if (Math.abs(this.carSpeed) > 0.5) {
-      const speedFactor = Math.max(0.3, 1 - (Math.abs(this.carSpeed) / this.maxSpeed) * 0.7);
-      const steerAmount =
-        input.steering * this.turnSpeed * speedFactor * deltaTime * (this.carSpeed > 0 ? 1 : -1);
-      this.carRotation -= steerAmount;
-    }
+    this.director.update(dt);
 
-    // Update position
-    const forwardX = Math.sin(this.carRotation);
-    const forwardZ = Math.cos(this.carRotation);
-
-    this.carBody.position.x += forwardX * this.carSpeed * deltaTime;
-    this.carBody.position.z += forwardZ * this.carSpeed * deltaTime;
-    this.carBody.quaternion.setFromEuler(0, this.carRotation, 0);
-  }
-
-  private updateAIRacers(deltaTime: number): void {
-    // Collect all racer states for obstacle avoidance
-    const allStates: VehicleState[] = [
-      {
-        position: { x: this.carBody.position.x, y: this.carBody.position.y, z: this.carBody.position.z },
-        rotation: {
-          x: this.carBody.quaternion.x,
-          y: this.carBody.quaternion.y,
-          z: this.carBody.quaternion.z,
-          w: this.carBody.quaternion.w,
-        },
-        velocity: {
-          x: Math.sin(this.carRotation) * this.carSpeed,
-          y: 0,
-          z: Math.cos(this.carRotation) * this.carSpeed,
-        },
-        angularVelocity: { x: 0, y: 0, z: 0 },
-        speed: Math.abs(this.carSpeed) * 3.6,
-        rpm: 3000,
-        gear: 3,
-        wheelStates: [],
-      },
-    ];
-
-    // Add other AI states
-    for (const racer of this.aiRacers) {
-      allStates.push(racer.getVehicleState());
-    }
-
-    // Update each AI racer
-    for (let i = 0; i < this.aiRacers.length; i++) {
-      const obstacles = allStates.filter((_, idx) => idx !== i + 1);
-      this.aiRacers[i].update(deltaTime, obstacles);
-    }
-  }
-
-  private handleSkidMarks(input: { throttle: number; steering: number }, deltaTime: number): void {
-    const now = performance.now();
-    if (now - this.lastSkidTime < this.SKID_INTERVAL) return;
-
-    const isSkidding =
-      (Math.abs(input.steering) > 0.5 && Math.abs(this.carSpeed) > 15) ||
-      (input.throttle < -0.5 && this.carSpeed > 10);
-
-    if (isSkidding) {
-      this.lastSkidTime = now;
-
-      // Calculate rear wheel positions in world space
-      const carPos = new THREE.Vector3(
-        this.carBody.position.x,
-        0,
-        this.carBody.position.z
-      );
-
-      const leftOffset = new THREE.Vector3(-1.1, 0, -1.3);
-      const rightOffset = new THREE.Vector3(1.1, 0, -1.3);
-
-      // Rotate offsets by car rotation
-      leftOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.carRotation);
-      rightOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.carRotation);
-
-      const leftWheelPos = carPos.clone().add(leftOffset);
-      const rightWheelPos = carPos.clone().add(rightOffset);
-
-      this.skidMarkManager.addSkidPair(leftWheelPos, rightWheelPos, this.carRotation);
-    }
-  }
-
-  private detectLapCrossing(): void {
-    const currentX = this.carBody.position.x;
-    const currentZ = this.carBody.position.z;
-
-    // Use the actual start position and track direction for finish line detection
-    const startX = this.startPosition.x;
-    const startZ = this.startPosition.z;
-    const trackDir = this.startPosition.rotation;
-
-    // Calculate distance along the track direction from start
-    // This gives us a signed distance: positive when past the line in track direction
-    const dx = currentX - startX;
-    const dz = currentZ - startZ;
-
-    // Project onto track direction (forward = positive)
-    const forwardDist = dx * Math.sin(trackDir) + dz * Math.cos(trackDir);
-
-    // Project onto perpendicular (lateral distance from finish line)
-    const lateralDist = Math.abs(dx * Math.cos(trackDir) - dz * Math.sin(trackDir));
-
-    // Track the previous forward distance
-    const prevForwardDist = this.lastZ; // Repurposing lastZ as lastForwardDist
-
-    // Finish line width based on track width at start
-    const finishLineWidth = this.waypoints[0]?.width || 16;
-
-    if (lateralDist < finishLineWidth / 2 && !this.raceComplete) {
-      // Crossed from behind (-) to in front (+) of finish line
-      if (prevForwardDist < 0 && forwardDist >= 0 && !this.crossedFinishLine) {
-        this.crossedFinishLine = true;
-        const lapTime = performance.now() - this.lapStartTime;
-
-        if (this.currentLap > 0) {
-          this.lapTimes.push(lapTime);
-
-          if (this.bestLapTime === 0 || lapTime < this.bestLapTime) {
-            this.bestLapTime = lapTime;
-          }
+    // impacts → feedback
+    for (const b of this.bundles) {
+      for (const imp of b.car.impacts) {
+        if (b === this.player) {
+          this.camera.addShake(Math.min(1, imp.magnitude / 12));
+          this.audio.impact(imp.magnitude);
+          if (imp.magnitude > 6) HapticFeedback.collision();
         }
-
-        if (this.currentLap >= this.gameState.totalLaps) {
-          this.completeRace();
-        } else {
-          this.currentLap++;
-          this.lapStartTime = performance.now();
-          HapticFeedback.checkpoint();
-        }
-      } else if (forwardDist < -10) {
-        // Reset flag when car is well behind the line
-        this.crossedFinishLine = false;
-      }
-    }
-    this.lastZ = forwardDist; // Store forward distance for next frame
-  }
-
-  private updateRacePosition(): void {
-    if (this.gameMode !== 'race') return;
-
-    let position = 1;
-    const playerProgress = this.getPlayerProgress();
-
-    for (const racer of this.aiRacers) {
-      const aiProgress = this.getAIProgress(racer);
-      if (aiProgress > playerProgress) {
-        position++;
       }
     }
 
-    this.racePosition = position;
+    this.syncStore(input.throttle);
+
+    const pc = this.player.car;
+    this.audio.update(pc.rpm, Math.max(0, pc.throttle), pc.slip, pc.speed, pc.surface, pc.boostTime > 0);
   }
 
-  private getPlayerProgress(): number {
-    return this.currentLap * 1000 + this.getWaypointProgress(
-      this.carBody.position.x,
-      this.carBody.position.z
-    );
-  }
+  private syncStore(throttle: number): void {
+    const s = this.store.state;
+    const pc = this.player.car;
+    const r = this.player.racer;
+    s.phase = this.director.phase;
+    s.go = this.director.goFlash;
+    s.speedKmh = pc.speedKmh;
+    s.rpm = pc.rpm;
+    s.gear = pc.gear;
+    s.lap = Math.min(r.lap, this.lapsTotal);
+    s.position = r.position;
+    s.lapTime = this.director.currentLapTime(r);
+    s.bestLap = r.bestLap;
+    s.lastLap = r.lastLap;
+    s.lastLapDelta = r.lastLapDelta;
+    s.raceTime = this.director.raceTime * 1000;
+    s.driftCharge = pc.driftCharge;
+    s.driftTier = pc.driftCharge >= 2.9 ? 3 : pc.driftCharge >= 1.8 ? 2 : pc.driftCharge >= 0.9 ? 1 : 0;
+    s.isDrifting = pc.isDrifting;
+    s.boostTime = pc.boostTime;
+    s.boostTier = pc.boostTier;
+    s.offTrack = pc.surface === 'grass';
+    s.stuck = pc.stuck;
+    s.fps = this.loop.getFPS();
+    s.dots = this.bundles.map((b) => ({ x: b.car.x, z: b.car.z, heading: b.car.heading, color: b.racer.color, isPlayer: b.racer.isPlayer }));
 
-  private getAIProgress(racer: AIRacer): number {
-    const state = racer.getState();
-    return racer.getLap() * 1000 + state.waypointIndex;
-  }
-
-  private getWaypointProgress(x: number, z: number): number {
-    let minDist = Infinity;
-    let closestIndex = 0;
-
-    for (let i = 0; i < this.waypoints.length; i++) {
-      const wp = this.waypoints[i];
-      const dx = wp.x - x;
-      const dz = wp.z - z;
-      const dist = dx * dx + dz * dz;
-      if (dist < minDist) {
-        minDist = dist;
-        closestIndex = i;
-      }
+    if (!this.driftHintShown && this.director.phase === 'racing' && this.director.raceTime > 4 && pc.speed > 15 && Math.abs(this.spline.sampleAt(pc.splineS + 30).curvature) > 0.02 && !this.input.isTouchActive()) {
+      this.driftHintShown = true;
+      s.showDriftHint = true;
+      this.store.notify('HOLD SPACE TO DRIFT', 'info', 2600, 'Release for a boost');
     }
+    void throttle;
 
-    return closestIndex;
+    const cold = `${s.phase}|${s.lap}|${s.position}|${s.gear}|${s.wrongWay}|${s.offTrack}|${s.stuck}|${s.boostTier}|${s.driftTier}|${s.isDrifting}|${s.countdown}|${s.go}`;
+    const swept = this.store.sweep();
+    if (cold !== this.lastColdKey && !swept) {
+      this.lastColdKey = cold;
+      this.store.emit();
+    } else if (cold !== this.lastColdKey) {
+      this.lastColdKey = cold;
+    }
   }
 
-  private completeRace(): void {
-    this.raceComplete = true;
-    HapticFeedback.raceComplete();
-    const totalTime = performance.now() - this.raceStartTime;
-
-    this.carSpeed = 0;
-
-    this.options.onRaceComplete?.({
-      totalTime,
-      bestLapTime: this.bestLapTime,
-      lapTimes: this.lapTimes,
-      totalLaps: this.gameState.totalLaps,
-      position: this.racePosition,
-    });
-
-    this.pause();
-  }
-
-  private updateGameState(): void {
-    const now = performance.now();
-    if (now - this.lastUIUpdate < this.UI_UPDATE_INTERVAL) return;
-    this.lastUIUpdate = now;
-
-    // Only count time if race has started
-    const currentLapTime = this.raceStarted ? now - this.lapStartTime : 0;
-    const speedKmh = Math.abs(this.carSpeed) * 3.6;
-
-    let gear = 1;
-    if (this.carSpeed < 0) {
-      gear = -1;
-    } else if (speedKmh < 10) {
-      gear = 1;
-    } else if (speedKmh < 50) {
-      gear = 2;
-    } else if (speedKmh < 100) {
-      gear = 3;
-    } else if (speedKmh < 150) {
-      gear = 4;
+  private render(alpha: number, dt: number): void {
+    if (this.disposed) return;
+    for (const b of this.bundles) {
+      updateCarVisual(b.visual, b.car, alpha, dt);
+      b.visual.group.updateMatrixWorld();
+      b.fx.update(dt, b.car, b.visual);
+    }
+    const pc = this.player.car;
+    this.camera.setRumble(pc.surface === 'grass' ? 1 : pc.surface === 'kerb' ? 0.5 : 0);
+    this.camera.update(pc, alpha, dt, this.director.phase === 'countdown');
+    this.particles.update(dt, this.engine.camera);
+    this.environment.update(this.engine.camera.position, this.time);
+    this.engine.followShadow(pc.x, pc.z);
+    if (this.director.phase === 'countdown') {
+      const lit = Math.min(5, Math.floor((3 - this.director.countdownRemaining) / 3 * 5) + 1);
+      this.trackMesh.setStartLights(lit, false);
     } else {
-      gear = 5;
+      this.trackMesh.setStartLights(5, this.director.raceTime < 3);
     }
-
-    // Calculate RPM based on speed and gear
-    const gearRatios = [0, 3.5, 2.5, 1.8, 1.3, 1.0];
-    const gearRatio = gear > 0 ? (gearRatios[gear] || 1.0) : 1.0;
-    const rpm = Math.round(Math.min(8000, 800 + (speedKmh * gearRatio * 30)));
-
-    this.gameState = {
-      ...this.gameState,
-      speed: Math.round(speedKmh),
-      rpm,
-      gear,
-      lap: this.currentLap,
-      position: this.racePosition,
-      lapTime: currentLapTime,
-      bestLapTime: this.bestLapTime,
-      carX: this.carBody.position.x,
-      carZ: this.carBody.position.z,
-      carRotation: this.carRotation,
-    };
-
-    this.options.onGameStateUpdate?.({ ...this.gameState });
-  }
-
-  private render(): void {
-    // Sync car visual with physics
-    this.carMesh.position.set(
-      this.carBody.position.x,
-      this.carBody.position.y,
-      this.carBody.position.z
-    );
-    this.carMesh.quaternion.set(
-      this.carBody.quaternion.x,
-      this.carBody.quaternion.y,
-      this.carBody.quaternion.z,
-      this.carBody.quaternion.w
-    );
-
-    // Animate wheels based on speed (frame-rate independent using fixed timestep)
-    const wheelRotation = this.carSpeed * this.gameLoop.getFixedTimeStep() * 5;
-    this.wheelMeshes.forEach((wheel) => {
-      wheel.rotation.x += wheelRotation;
-    });
-
-    // Smooth camera follow
-    const carPos = this.carMesh.position;
-    const carDir = new THREE.Vector3(0, 0, 1);
-    carDir.applyQuaternion(this.carMesh.quaternion);
-
-    const cameraOffset = carDir.clone().multiplyScalar(-12);
-    cameraOffset.y = 6;
-
-    const targetCamPos = carPos.clone().add(cameraOffset);
-    this.cameraPosition.lerp(targetCamPos, 0.05);
-    this.engine.camera.position.copy(this.cameraPosition);
-
-    this.cameraTarget.lerp(carPos.clone().add(new THREE.Vector3(0, 1, 0)), 0.1);
-    this.engine.camera.lookAt(this.cameraTarget);
-
-    // Render
     this.engine.render();
   }
 
-  private resetCar(): void {
-    this.carBody.position.set(this.startPosition.x, 0.75, this.startPosition.z);
-    this.carBody.quaternion.setFromEuler(0, this.startPosition.rotation, 0);
-    this.carBody.velocity.set(0, 0, 0);
-    this.carBody.angularVelocity.set(0, 0, 0);
-    this.carSpeed = 0;
-    this.carRotation = this.startPosition.rotation;
-    this.lapStartTime = performance.now();
-    // Reset finish line crossing state to prevent false lap triggers
-    this.lastZ = 5;
-    this.crossedFinishLine = false;
-  }
-
   public pause(): void {
-    this.isPaused = true;
-    this.gameLoop?.pause();
+    if (this.paused || !this.initialised) return;
+    this.paused = true;
+    this.loop.stop();
+    this.input.setEnabled(false);
+    this.audio.suspend();
   }
 
   public resume(): void {
-    this.isPaused = false;
-    this.gameLoop?.resume();
+    if (!this.paused || this.disposed) return;
+    this.paused = false;
+    this.input.clearPending();
+    this.input.setEnabled(true);
+    this.audio.resume();
+    this.loop.start();
   }
 
   public restart(): void {
-    // Reset player
-    this.resetCar();
-
-    // Reset AI racers
-    const aiStartPositions = this.trackBuilder.getAIStartPositions(this.AI_COUNT);
-    for (let i = 0; i < this.aiRacers.length; i++) {
-      this.aiRacers[i].reset(aiStartPositions[i]);
-    }
-
-    // Reset game state
-    this.currentLap = 1;
-    this.racePosition = 1;
-    this.bestLapTime = 0;
-    this.lapTimes = [];
-    this.raceComplete = false;
-    this.crossedFinishLine = false;
-    this.raceStarted = false;
-    this.lapStartTime = 0;
-    this.raceStartTime = 0;
-    // Reset forward distance to positive value so car must complete a full lap
-    this.lastZ = 5;
-
-    // Clear skid marks
-    this.skidMarkManager.clear();
-
+    if (!this.initialised) return;
+    this.finished = false;
+    this.driftHintShown = false;
+    this.bundles.forEach((b, i) => {
+      const slot = this.spline.gridSlot(i);
+      b.car.place(slot.x, slot.z, slot.rotation);
+      b.ai?.reset();
+    });
+    this.director.reset();
+    this.skids.clear();
+    this.particles.clear();
+    const st = this.store.state;
+    Object.assign(st, { countdown: 3, go: false, wrongWay: false, notices: [], phase: 'countdown' });
+    this.camera.snapTo(this.player.car);
+    this.store.emit();
     this.resume();
   }
 
+  public isPaused(): boolean { return this.paused; }
+
+  /** Development aid: let an AI drive the player car (used by the end-to-end drive-through). */
+  public setAutopilot(on: boolean): void {
+    if (process.env.NODE_ENV === 'production') return;
+    this.autopilot = on ? new AIDriver(this.player.car, this.spline, 'aggressive', 1) : null;
+    if (!on) this.player.car.maxSpeedScale = 1;
+  }
+
+  public getPhase(): string { return this.director?.phase ?? 'loading'; }
+  public getInputManager(): InputManager | null { return this.input ?? null; }
+  public getMinimapData(): MinimapData | null { return this.spline ? this.spline.getMinimapData() : null; }
+  public getTrackId(): string | undefined { return this.options.customTrack?.id; }
+  public getTrackLength(): number { return this.spline?.length ?? 0; }
+
   public dispose(): void {
-    this.gameLoop?.stop();
-    this.inputManager?.dispose();
-    this.skidMarkManager?.dispose();
-
-    // Dispose AI racers
-    for (const racer of this.aiRacers) {
-      racer.dispose(this.engine.scene, this.world);
-    }
-    this.aiRacers = [];
-
-    // Remove player car body from physics world
-    if (this.carBody && this.world) {
-      this.world.removeBody(this.carBody);
-    }
-
-    // Dispose player car geometries and materials to prevent GPU memory leak
-    if (this.carMesh) {
-      this.carMesh.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (Array.isArray(child.material)) {
-            child.material.forEach((m) => m.dispose());
-          } else if (child.material) {
-            child.material.dispose();
-          }
-        }
-      });
-      this.engine?.scene?.remove(this.carMesh);
-    }
-
+    if (this.disposed) return;
+    this.disposed = true;
+    this.loop?.stop();
+    this.unsubscribeSettings?.();
+    this.unsubscribeDirector?.();
+    this.input?.dispose();
+    this.audio.dispose();
+    for (const b of this.bundles) b.visual.dispose();
+    this.bundles = [];
+    this.particles?.dispose();
+    this.skids?.dispose();
+    this.trackMesh?.dispose();
+    this.environment?.dispose();
     this.engine?.dispose();
   }
-
-  public getGameState(): GameState {
-    return { ...this.gameState };
-  }
-
-  public isRunning(): boolean {
-    return this.isInitialized && !this.isPaused;
-  }
-
-  public getMinimapData(): MinimapData | null {
-    if (!this.trackBuilder) return null;
-    return this.trackBuilder.getMinimapData();
-  }
-
-  public getCustomTrackId(): string | undefined {
-    return this.options.customTrack?.id;
-  }
-
-  public getInputManager(): InputManager | null {
-    return this.inputManager ?? null;
-  }
 }
+
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
+    else setTimeout(resolve, 0);
+  });
+}
+
+function formatDeltaShort(ms: number): string {
+  if (!ms) return '';
+  const sign = ms < 0 ? '-' : '+';
+  return `${sign}${(Math.abs(ms) / 1000).toFixed(3)}`;
+}
+

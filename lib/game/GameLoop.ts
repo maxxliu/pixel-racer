@@ -1,150 +1,67 @@
-export type UpdateCallback = (deltaTime: number) => void;
-export type RenderCallback = (interpolation: number) => void;
+export type UpdateCallback = (dt: number) => void;
+export type RenderCallback = (alpha: number, dt: number) => void;
 
-export interface GameLoopOptions {
-  fixedTimeStep?: number; // Physics timestep in seconds (default: 1/60)
-  maxSubSteps?: number; // Maximum physics steps per frame (default: 3)
-}
-
+/**
+ * Fixed-timestep loop with render interpolation.
+ * The accumulator is clamped so a long stall never causes a fast-forward burst.
+ */
 export class GameLoop {
-  private isRunning: boolean = false;
-  private animationFrameId: number | null = null;
+  private running = false;
+  private rafId: number | null = null;
+  private lastTime = 0;
+  private accumulator = 0;
+  private readonly step: number;
+  private readonly maxSteps: number;
+  private update: UpdateCallback | null = null;
+  private render: RenderCallback | null = null;
+  private fps = 60;
+  private frames = 0;
+  private fpsTime = 0;
 
-  private lastTime: number = 0;
-  private accumulator: number = 0;
-  private fixedTimeStep: number;
-  private maxSubSteps: number;
-
-  private updateCallbacks: UpdateCallback[] = [];
-  private renderCallbacks: RenderCallback[] = [];
-
-  // Performance metrics
-  private frameCount: number = 0;
-  private fpsUpdateTime: number = 0;
-  private currentFPS: number = 60;
-  private physicsTime: number = 0;
-  private renderTime: number = 0;
-
-  constructor(options: GameLoopOptions = {}) {
-    this.fixedTimeStep = options.fixedTimeStep ?? 1 / 60;
-    this.maxSubSteps = options.maxSubSteps ?? 3;
+  constructor(step = 1 / 60, maxSteps = 4) {
+    this.step = step;
+    this.maxSteps = maxSteps;
   }
 
-  public start(): void {
-    if (this.isRunning) return;
+  public onUpdate(cb: UpdateCallback): void { this.update = cb; }
+  public onRender(cb: RenderCallback): void { this.render = cb; }
+  public getFixedTimeStep(): number { return this.step; }
+  public getFPS(): number { return this.fps; }
+  public isRunning(): boolean { return this.running; }
 
-    this.isRunning = true;
+  public start(): void {
+    if (this.running) return;
+    this.running = true;
     this.lastTime = performance.now();
     this.accumulator = 0;
-    this.fpsUpdateTime = this.lastTime;
-    this.frameCount = 0;
-
-    this.loop(this.lastTime);
+    this.rafId = requestAnimationFrame(this.tick);
   }
 
   public stop(): void {
-    this.isRunning = false;
-    if (this.animationFrameId !== null) {
-      cancelAnimationFrame(this.animationFrameId);
-      this.animationFrameId = null;
-    }
+    this.running = false;
+    if (this.rafId !== null) cancelAnimationFrame(this.rafId);
+    this.rafId = null;
   }
 
-  public pause(): void {
-    this.isRunning = false;
-    if (this.animationFrameId !== null) {
-      cancelAnimationFrame(this.animationFrameId);
-      this.animationFrameId = null;
-    }
-  }
-
-  public resume(): void {
-    if (!this.isRunning) {
-      this.isRunning = true;
-      this.lastTime = performance.now();
-      this.accumulator = 0;
-      this.loop(this.lastTime);
-    }
-  }
-
-  private loop = (currentTime: number): void => {
-    if (!this.isRunning) return;
-
-    this.animationFrameId = requestAnimationFrame(this.loop);
-
-    // Calculate frame time (cap at 250ms to prevent spiral of death)
-    const frameTime = Math.min((currentTime - this.lastTime) / 1000, 0.25);
-    this.lastTime = currentTime;
-    this.accumulator += frameTime;
-
-    // Fixed timestep physics updates
-    const physicsStart = performance.now();
+  private tick = (now: number): void => {
+    if (!this.running) return;
+    this.rafId = requestAnimationFrame(this.tick);
+    let frame = (now - this.lastTime) / 1000;
+    this.lastTime = now;
+    if (frame > 0.25) frame = 0.25;
+    this.accumulator = Math.min(this.accumulator + frame, this.step * this.maxSteps);
     let steps = 0;
-    while (this.accumulator >= this.fixedTimeStep && steps < this.maxSubSteps) {
-      for (const callback of this.updateCallbacks) {
-        callback(this.fixedTimeStep);
-      }
-      this.accumulator -= this.fixedTimeStep;
+    while (this.accumulator >= this.step && steps < this.maxSteps) {
+      this.update?.(this.step);
+      this.accumulator -= this.step;
       steps++;
     }
-    this.physicsTime = performance.now() - physicsStart;
-
-    // Calculate interpolation for smooth rendering
-    const interpolation = this.accumulator / this.fixedTimeStep;
-
-    // Render
-    const renderStart = performance.now();
-    for (const callback of this.renderCallbacks) {
-      callback(interpolation);
-    }
-    this.renderTime = performance.now() - renderStart;
-
-    // Update FPS counter
-    this.frameCount++;
-    if (currentTime - this.fpsUpdateTime >= 1000) {
-      this.currentFPS = this.frameCount;
-      this.frameCount = 0;
-      this.fpsUpdateTime = currentTime;
+    this.render?.(this.accumulator / this.step, frame);
+    this.frames++;
+    if (now - this.fpsTime >= 1000) {
+      this.fps = this.frames;
+      this.frames = 0;
+      this.fpsTime = now;
     }
   };
-
-  public onUpdate(callback: UpdateCallback): () => void {
-    this.updateCallbacks.push(callback);
-    return () => {
-      const index = this.updateCallbacks.indexOf(callback);
-      if (index !== -1) {
-        this.updateCallbacks.splice(index, 1);
-      }
-    };
-  }
-
-  public onRender(callback: RenderCallback): () => void {
-    this.renderCallbacks.push(callback);
-    return () => {
-      const index = this.renderCallbacks.indexOf(callback);
-      if (index !== -1) {
-        this.renderCallbacks.splice(index, 1);
-      }
-    };
-  }
-
-  public getFPS(): number {
-    return this.currentFPS;
-  }
-
-  public getPhysicsTime(): number {
-    return this.physicsTime;
-  }
-
-  public getRenderTime(): number {
-    return this.renderTime;
-  }
-
-  public getFixedTimeStep(): number {
-    return this.fixedTimeStep;
-  }
-
-  public isActive(): boolean {
-    return this.isRunning;
-  }
 }

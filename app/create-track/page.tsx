@@ -1,8 +1,8 @@
 import TrackCreator from '@/components/ui/TrackCreator';
 
 export const metadata = {
-  title: 'Create Track - Pixel Racer',
-  description: 'Create your own custom racing track'
+  title: 'Create Track · Pixel Racer',
+  description: 'Draw or generate your own racing track',
 };
 
 export default function CreateTrackPage() {

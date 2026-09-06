@@ -1,54 +1,43 @@
 'use client';
 
+import { useState } from 'react';
+import { Modal } from '@/components/ui/Modal';
+import { Button } from '@/components/ui/Button';
+import { Kbd } from '@/components/ui/Kbd';
+import { SettingsModal } from '@/components/ui/SettingsModal';
+
 interface PauseMenuProps {
   onResume: () => void;
   onRestart: () => void;
   onExit: () => void;
+  isMobile?: boolean;
 }
 
-export default function PauseMenu({ onResume, onRestart, onExit }: PauseMenuProps) {
+export default function PauseMenu({ onResume, onRestart, onExit, isMobile = false }: PauseMenuProps) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
   return (
-    <div className="fixed inset-0 bg-pixel-black/90 flex items-center justify-center z-50">
-      {/* Scanlines */}
-      <div className="absolute inset-0 scanlines" />
-
-      {/* CRT vignette */}
-      <div className="absolute inset-0 crt-vignette" />
-
-      {/* Content */}
-      <div className="relative z-10 pixel-panel min-w-[320px]">
-        <h2 className="font-pixel text-2xl text-pixel-yellow pixel-text-shadow text-center mb-8 animate-blink">
-          PAUSED
-        </h2>
-
-        <div className="flex flex-col gap-4">
-          <button
-            onClick={onResume}
-            className="pixel-btn pixel-btn-primary w-full text-center"
-          >
-            RESUME
-          </button>
-
-          <button
-            onClick={onRestart}
-            className="pixel-btn pixel-btn-secondary w-full text-center"
-          >
-            RESTART
-          </button>
-
-          <button
-            onClick={onExit}
-            className="pixel-btn w-full text-center"
-            style={{ background: 'var(--pixel-purple)' }}
-          >
-            EXIT
-          </button>
+    <>
+      <Modal open={!settingsOpen} onClose={onResume} title="Paused" dim="light" width="max-w-sm">
+        <div className="flex flex-col gap-3">
+          <Button variant="primary" size="lg" onClick={onResume} autoFocus>Resume</Button>
+          <Button onClick={onRestart}>Restart race</Button>
+          <Button onClick={() => setSettingsOpen(true)}>Settings</Button>
+          <Button variant="danger" onClick={onExit}>Quit to menu</Button>
         </div>
-
-        <div className="mt-8 text-center font-pixel text-[10px] text-pixel-gray">
-          PRESS ESC TO RESUME
-        </div>
-      </div>
-    </div>
+        {!isMobile && (
+          <div className="mt-6 grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-muted">
+            <div><Kbd>W</Kbd> <Kbd>S</Kbd> throttle / brake</div>
+            <div><Kbd>A</Kbd> <Kbd>D</Kbd> steer</div>
+            <div><Kbd>Space</Kbd> drift</div>
+            <div><Kbd>Shift</Kbd> hard brake</div>
+            <div><Kbd>C</Kbd> camera</div>
+            <div><Kbd>R</Kbd> respawn</div>
+            <div><Kbd>M</Kbd> mute</div>
+            <div><Kbd>Esc</Kbd> resume</div>
+          </div>
+        )}
+      </Modal>
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} inGame />
+    </>
   );
 }

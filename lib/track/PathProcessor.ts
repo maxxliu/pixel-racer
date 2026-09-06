@@ -5,7 +5,7 @@
 
 import { Point2D, distance, calculatePathLength } from './TrackGeometryUtils';
 import { analyzeTrackCurvature } from './CurvatureAnalyzer';
-import type { TrackWaypoint } from '@/lib/game/TrackBuilder';
+import type { TrackWaypoint } from '@/lib/game/types';
 
 export interface ProcessingOptions {
   simplificationTolerance?: number;  // Douglas-Peucker tolerance (default: 3m)

@@ -12,7 +12,7 @@ import {
 } from './TrackGeometryUtils';
 import { validateTrack, hasSelfIntersections } from './TrackValidator';
 import { laplacianSmooth, catmullRomSmooth, assignTrackProperties } from './PathProcessor';
-import type { TrackWaypoint } from '@/lib/game/TrackBuilder';
+import type { TrackWaypoint } from '@/lib/game/types';
 
 export interface GenerationOptions {
   minPoints?: number;              // Minimum base points (default: 6)

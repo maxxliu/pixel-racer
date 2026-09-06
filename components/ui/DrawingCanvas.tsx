@@ -1,296 +1,144 @@
 'use client';
 
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Point2D } from '@/lib/track/TrackGeometryUtils';
 
 export interface DrawingCanvasProps {
-  width?: number;
-  height?: number;
+  size?: number;
   worldBounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
-  onPointsChange?: (points: Point2D[]) => void;
-  showGrid?: boolean;
-  gridSize?: number;
-  strokeColor?: string;
-  strokeWidth?: number;
-  minPointDistance?: number;
+  strokes: Point2D[][];
+  onStrokesChange: (strokes: Point2D[][]) => void;
   disabled?: boolean;
+  minPointDistance?: number;
 }
 
-const DEFAULT_WORLD_BOUNDS = {
-  minX: -150,
-  maxX: 150,
-  minZ: -150,
-  maxZ: 150
-};
+const DEFAULT_BOUNDS = { minX: -150, maxX: 150, minZ: -150, maxZ: 150 };
 
-export default function DrawingCanvas({
-  width = 600,
-  height = 600,
-  worldBounds = DEFAULT_WORLD_BOUNDS,
-  onPointsChange,
-  showGrid = true,
-  gridSize = 20,
-  strokeColor = '#dc2626',
-  strokeWidth = 3,
-  minPointDistance = 5,
-  disabled = false
-}: DrawingCanvasProps) {
+/**
+ * Multi-stroke drawing surface. Each pointer-down starts a new stroke that is
+ * appended (never replaces). Uses pointer events with capture so drags that
+ * leave the canvas still end cleanly; touch scrolling is suppressed via CSS.
+ */
+export default function DrawingCanvas({ size = 600, worldBounds = DEFAULT_BOUNDS, strokes, onStrokesChange, disabled = false, minPointDistance = 4 }: DrawingCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [points, setPoints] = useState<Point2D[]>([]);
-  const [lastPoint, setLastPoint] = useState<Point2D | null>(null);
+  const [drawing, setDrawing] = useState(false);
+  const currentRef = useRef<Point2D[]>([]);
 
-  // Convert screen coordinates to world coordinates
-  const screenToWorld = useCallback((screenX: number, screenY: number): Point2D => {
-    const worldWidth = worldBounds.maxX - worldBounds.minX;
-    const worldHeight = worldBounds.maxZ - worldBounds.minZ;
-
+  const toWorld = useCallback((clientX: number, clientY: number): Point2D => {
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    const sx = ((clientX - rect.left) / rect.width) * size;
+    const sy = ((clientY - rect.top) / rect.height) * size;
     return {
-      x: worldBounds.minX + (screenX / width) * worldWidth,
-      z: worldBounds.minZ + (screenY / height) * worldHeight
+      x: worldBounds.minX + (sx / size) * (worldBounds.maxX - worldBounds.minX),
+      z: worldBounds.minZ + (sy / size) * (worldBounds.maxZ - worldBounds.minZ),
     };
-  }, [width, height, worldBounds]);
+  }, [size, worldBounds]);
 
-  // Convert world coordinates to screen coordinates
-  const worldToScreen = useCallback((worldX: number, worldZ: number): { x: number; y: number } => {
-    const worldWidth = worldBounds.maxX - worldBounds.minX;
-    const worldHeight = worldBounds.maxZ - worldBounds.minZ;
+  const toScreen = useCallback((p: Point2D) => ({
+    x: ((p.x - worldBounds.minX) / (worldBounds.maxX - worldBounds.minX)) * size,
+    y: ((p.z - worldBounds.minZ) / (worldBounds.maxZ - worldBounds.minZ)) * size,
+  }), [size, worldBounds]);
 
-    return {
-      x: ((worldX - worldBounds.minX) / worldWidth) * width,
-      y: ((worldZ - worldBounds.minZ) / worldHeight) * height
-    };
-  }, [width, height, worldBounds]);
-
-  // Draw the canvas
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Clear canvas
-    ctx.fillStyle = '#171717';
-    ctx.fillRect(0, 0, width, height);
-
-    // Draw grid
-    if (showGrid) {
-      ctx.strokeStyle = '#262626';
-      ctx.lineWidth = 1;
-
-      const worldWidth = worldBounds.maxX - worldBounds.minX;
-      const worldHeight = worldBounds.maxZ - worldBounds.minZ;
-      const screenGridSize = (gridSize / worldWidth) * width;
-
-      for (let x = 0; x <= width; x += screenGridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-      }
-
-      for (let y = 0; y <= height; y += screenGridSize) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
-      }
-
-      // Draw center lines
-      ctx.strokeStyle = '#404040';
-      ctx.beginPath();
-      ctx.moveTo(width / 2, 0);
-      ctx.lineTo(width / 2, height);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, height / 2);
-      ctx.lineTo(width, height / 2);
-      ctx.stroke();
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    ctx.fillStyle = '#160f2b';
+    ctx.fillRect(0, 0, size, size);
+    ctx.strokeStyle = 'rgba(255,247,239,0.06)';
+    ctx.lineWidth = 1;
+    const step = size / 15;
+    for (let i = 0; i <= 15; i++) {
+      ctx.beginPath(); ctx.moveTo(i * step, 0); ctx.lineTo(i * step, size); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i * step); ctx.lineTo(size, i * step); ctx.stroke();
     }
-
-    // Draw the path
-    if (points.length > 0) {
-      ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = strokeWidth;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-
+    const all = [...strokes, currentRef.current].filter((s) => s.length > 0);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    all.forEach((stroke, si) => {
+      ctx.strokeStyle = si === all.length - 1 && drawing ? '#c8ff3d' : '#ff5c4d';
+      ctx.lineWidth = 12;
+      ctx.globalAlpha = 0.35;
       ctx.beginPath();
-      const firstScreen = worldToScreen(points[0].x, points[0].z);
-      ctx.moveTo(firstScreen.x, firstScreen.y);
-
-      for (let i = 1; i < points.length; i++) {
-        const screenPoint = worldToScreen(points[i].x, points[i].z);
-        ctx.lineTo(screenPoint.x, screenPoint.y);
-      }
-
+      stroke.forEach((p, i) => { const s = toScreen(p); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); });
       ctx.stroke();
-
-      // Draw start point
-      ctx.fillStyle = '#00e436';
-      ctx.beginPath();
-      ctx.arc(firstScreen.x, firstScreen.y, 8, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Draw end point if we have more than 1 point
-      if (points.length > 1) {
-        const lastScreen = worldToScreen(points[points.length - 1].x, points[points.length - 1].z);
-        ctx.fillStyle = '#dc2626';
-        ctx.beginPath();
-        ctx.arc(lastScreen.x, lastScreen.y, 6, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Show closure indicator if endpoints are close
-        const closureDistance = Math.sqrt(
-          Math.pow(points[0].x - points[points.length - 1].x, 2) +
-          Math.pow(points[0].z - points[points.length - 1].z, 2)
-        );
-
-        if (closureDistance < 20 && closureDistance > 0) {
-          // Draw dashed line showing closure
-          ctx.strokeStyle = '#fbbf24';
-          ctx.lineWidth = 2;
-          ctx.setLineDash([5, 5]);
-          ctx.beginPath();
-          ctx.moveTo(lastScreen.x, lastScreen.y);
-          ctx.lineTo(firstScreen.x, firstScreen.y);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    });
+    const first = all[0]?.[0];
+    const flat = all.flat();
+    const last = flat[flat.length - 1];
+    if (first) {
+      const s = toScreen(first);
+      ctx.fillStyle = '#c8ff3d';
+      ctx.beginPath(); ctx.arc(s.x, s.y, 7, 0, Math.PI * 2); ctx.fill();
+    }
+    if (first && last && flat.length > 5) {
+      const a = toScreen(last), b = toScreen(first);
+      const gap = Math.hypot(first.x - last.x, first.z - last.z);
+      if (gap < 30) {
+        ctx.strokeStyle = '#ffd166';
+        ctx.setLineDash([6, 6]);
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        ctx.setLineDash([]);
       }
     }
-
-    // Draw "Draw your track" hint if empty
-    if (points.length === 0 && !disabled) {
-      ctx.fillStyle = '#737373';
-      ctx.font = '16px "Press Start 2P", monospace';
+    if (flat.length === 0 && !disabled) {
+      ctx.fillStyle = '#b7a9c9';
+      ctx.font = `700 22px "Chakra Petch", sans-serif`;
       ctx.textAlign = 'center';
-      ctx.fillText('Draw your track', width / 2, height / 2 - 10);
-      ctx.font = '12px "VT323", monospace';
-      ctx.fillText('Click and drag to create a path', width / 2, height / 2 + 20);
+      ctx.fillText('Draw a loop', size / 2, size / 2 - 8);
+      ctx.font = `14px Inter, sans-serif`;
+      ctx.fillText('Drag to draw. Lift and drag again to keep going.', size / 2, size / 2 + 18);
     }
-  }, [points, width, height, worldBounds, showGrid, gridSize, strokeColor, strokeWidth, worldToScreen, disabled]);
+  }, [strokes, drawing, size, toScreen, disabled]);
 
-  // Redraw when points change
-  useEffect(() => {
-    draw();
-  }, [draw]);
+  useEffect(() => { draw(); }, [draw]);
 
-  // Notify parent of points change
-  useEffect(() => {
-    onPointsChange?.(points);
-  }, [points, onPointsChange]);
-
-  // Get point from event
-  const getPointFromEvent = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>): Point2D => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, z: 0 };
-
-    const rect = canvas.getBoundingClientRect();
-    let clientX: number, clientY: number;
-
-    if ('touches' in e) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else {
-      clientX = e.clientX;
-      clientY = e.clientY;
+  const onDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (disabled || e.button > 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    currentRef.current = [toWorld(e.clientX, e.clientY)];
+    setDrawing(true);
+  };
+  const onMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawing || disabled) return;
+    const p = toWorld(e.clientX, e.clientY);
+    const last = currentRef.current[currentRef.current.length - 1];
+    if (!last || Math.hypot(p.x - last.x, p.z - last.z) >= minPointDistance) {
+      currentRef.current = [...currentRef.current, p];
+      draw();
     }
+  };
+  const onUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawing) return;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    setDrawing(false);
+    if (currentRef.current.length > 1) onStrokesChange([...strokes, currentRef.current]);
+    currentRef.current = [];
+  };
 
-    const scaleX = width / rect.width;
-    const scaleY = height / rect.height;
-    const screenX = (clientX - rect.left) * scaleX;
-    const screenY = (clientY - rect.top) * scaleY;
-
-    return screenToWorld(screenX, screenY);
-  }, [screenToWorld, width, height]);
-
-  // Check if point is far enough from last point
-  const isFarEnough = useCallback((newPoint: Point2D): boolean => {
-    if (!lastPoint) return true;
-
-    const dist = Math.sqrt(
-      Math.pow(newPoint.x - lastPoint.x, 2) +
-      Math.pow(newPoint.z - lastPoint.z, 2)
-    );
-
-    return dist >= minPointDistance;
-  }, [lastPoint, minPointDistance]);
-
-  // Handle mouse/touch down
-  const handleStart = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (disabled) return;
-    e.preventDefault();
-
-    const point = getPointFromEvent(e);
-    setIsDrawing(true);
-    setPoints([point]);
-    setLastPoint(point);
-  }, [disabled, getPointFromEvent]);
-
-  // Handle mouse/touch move
-  const handleMove = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || disabled) return;
-    e.preventDefault();
-
-    const point = getPointFromEvent(e);
-
-    if (isFarEnough(point)) {
-      setPoints(prev => [...prev, point]);
-      setLastPoint(point);
-    }
-  }, [isDrawing, disabled, getPointFromEvent, isFarEnough]);
-
-  // Handle mouse/touch up
-  const handleEnd = useCallback(() => {
-    setIsDrawing(false);
-  }, []);
-
-  // Clear the canvas
-  const clear = useCallback(() => {
-    setPoints([]);
-    setLastPoint(null);
-  }, []);
-
-  // Expose clear method via ref
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (canvas) {
-      (canvas as HTMLCanvasElement & { clear?: () => void }).clear = clear;
-    }
-  }, [clear]);
-
+  const pointCount = strokes.reduce((a, s) => a + s.length, 0);
   return (
     <div className="relative">
       <canvas
         ref={canvasRef}
-        width={width}
-        height={height}
-        className={`border-4 border-white shadow-pixel ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-crosshair'}`}
-        style={{ imageRendering: 'pixelated' }}
-        onMouseDown={handleStart}
-        onMouseMove={handleMove}
-        onMouseUp={handleEnd}
-        onMouseLeave={handleEnd}
-        onTouchStart={handleStart}
-        onTouchMove={handleMove}
-        onTouchEnd={handleEnd}
+        width={size}
+        height={size}
+        className={`glass-solid aspect-square w-full max-w-[600px] touch-none ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-crosshair'}`}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={onUp}
+        aria-label="Track drawing canvas"
+        role="img"
       />
-      {points.length > 0 && (
-        <div className="absolute bottom-2 left-2 bg-pixel-black/80 px-2 py-1 rounded">
-          <span className="text-xs text-pixel-gray font-pixel-body">
-            {points.length} points
-          </span>
-        </div>
+      {pointCount > 0 && (
+        <div className="absolute bottom-2 left-2 rounded-md bg-ink/70 px-2 py-1 text-xs text-muted hud-num">{strokes.length} stroke{strokes.length === 1 ? '' : 's'} · {pointCount} points</div>
       )}
     </div>
   );
-}
-
-// Export additional utilities
-export function clearCanvas(canvasElement: HTMLCanvasElement | null): void {
-  if (canvasElement && 'clear' in canvasElement) {
-    (canvasElement as HTMLCanvasElement & { clear: () => void }).clear();
-  }
 }

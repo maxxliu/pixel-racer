@@ -173,6 +173,9 @@ export class TouchInputHandler {
 
     const zone = this.getPointerZone(e);
     this.activePointers.set(e.pointerId, { zone });
+    if (zone !== 'none') {
+      try { this.element?.setPointerCapture(e.pointerId); } catch { /* unsupported */ }
+    }
 
     switch (zone) {
       case 'joystick':
@@ -244,7 +247,19 @@ export class TouchInputHandler {
     }
 
     this.activePointers.delete(e.pointerId);
+    try { this.element?.releasePointerCapture(e.pointerId); } catch { /* not captured */ }
   };
+
+  /** Release every pressed control (used when the overlay unmounts or the game pauses). */
+  public reset(): void {
+    this.activePointers.clear();
+    this.joystick.active = false;
+    this.joystick.pointerId = -1;
+    this.gasPressed = false;
+    this.brakePressed = false;
+    this.handbrakePressed = false;
+    this.state = this.createDefaultState();
+  }
 
   /**
    * Called once per frame by InputManager to get the current touch input state.
@@ -330,7 +345,7 @@ export class TouchInputHandler {
 
   public dispose(): void {
     this.detach();
-    this.activePointers.clear();
+    this.reset();
     this.buttonElements.clear();
   }
 
