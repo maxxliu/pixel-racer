@@ -51,6 +51,30 @@ export function circleVsSegment(
   return { depth: radius - dist, nx: seg.nx, nz: seg.nz, px: cp.x, pz: cp.z };
 }
 
+/**
+ * Swept circle vs. wall: catches a probe that crossed the wall plane between two
+ * positions in one step (tunnelling at high speed). Returns a hit that pushes the
+ * circle back to the drivable side, or null when it did not cross.
+ */
+export function sweptCircleVsSegment(
+  prevX: number, prevZ: number,
+  cx: number, cz: number, radius: number, seg: Segment,
+): CircleHit | null {
+  const sidePrev = (prevX - seg.ax) * seg.nx + (prevZ - seg.az) * seg.nz;
+  const sideNow = (cx - seg.ax) * seg.nx + (cz - seg.az) * seg.nz;
+  if (sidePrev < -radius * 0.5 || sideNow >= radius) return null; // was already behind, or is still clear
+  if (sideNow >= 0 && sideNow >= radius) return null;
+  // where the path meets the wall plane
+  const denom = sidePrev - sideNow;
+  const t = denom > 1e-9 ? Math.min(1, Math.max(0, sidePrev / denom)) : 0;
+  const ix = prevX + (cx - prevX) * t;
+  const iz = prevZ + (cz - prevZ) * t;
+  const cp = closestPointOnSegment(ix, iz, seg.ax, seg.az, seg.bx, seg.bz);
+  const along = Math.hypot(cp.x - ix, cp.z - iz);
+  if (along > radius) return null; // crossed the plane beyond the segment's ends
+  return { depth: radius - sideNow, nx: seg.nx, nz: seg.nz, px: cp.x, pz: cp.z };
+}
+
 export function circleVsCircle(
   ax: number, az: number, ar: number,
   bx: number, bz: number, br: number,

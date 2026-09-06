@@ -1,5 +1,5 @@
 import type { Road, Surface } from './Road';
-import { circleVsSegment, circleVsCircle, type Segment } from './Collision';
+import { circleVsSegment, sweptCircleVsSegment, circleVsCircle, type Segment } from './Collision';
 
 export interface CarInput {
   throttle: number; // -1..1
@@ -340,15 +340,17 @@ export class ArcadeCar {
     const T = CAR_TUNING;
     const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
     const probes = [
-      { x: this.x + fx * T.axleOffset, z: this.z + fz * T.axleOffset },
-      { x: this.x - fx * T.axleOffset, z: this.z - fz * T.axleOffset },
+      { x: this.x + fx * T.axleOffset, z: this.z + fz * T.axleOffset, px: this.prevX + fx * T.axleOffset, pz: this.prevZ + fz * T.axleOffset },
+      { x: this.x - fx * T.axleOffset, z: this.z - fz * T.axleOffset, px: this.prevX - fx * T.axleOffset, pz: this.prevZ - fz * T.axleOffset },
     ];
-    const segs = this.spline.queryWalls(this.x, this.z, T.bodyRadius + T.axleOffset + 1, this.wallScratch);
+    const moved = Math.hypot(this.x - this.prevX, this.z - this.prevZ);
+    const segs = this.spline.queryWalls(this.x, this.z, T.bodyRadius + T.axleOffset + 1 + moved, this.wallScratch);
     let maxImpact = 0;
     let ix = 0, iz = 0;
     for (const seg of segs) {
       for (const p of probes) {
-        const hit = circleVsSegment(p.x, p.z, T.bodyRadius, seg);
+        // a fast, steep hit can put the probe behind the wall in one step: sweep the path too
+        const hit = circleVsSegment(p.x, p.z, T.bodyRadius, seg) ?? sweptCircleVsSegment(p.px, p.pz, p.x, p.z, T.bodyRadius, seg);
         if (!hit) continue;
         this.x += hit.nx * hit.depth;
         this.z += hit.nz * hit.depth;

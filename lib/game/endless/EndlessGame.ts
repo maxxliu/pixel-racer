@@ -24,6 +24,7 @@ import { StreamRoadMesh } from './StreamRoadMesh';
 import { StreamEnvironment } from './StreamEnvironment';
 import { ObstacleMeshes } from './ObstacleMeshes';
 import { ENDLESS_TUNING } from './tuning';
+import { driveAlong } from './EndlessBot';
 
 export type { RunResults } from './EndlessDirector';
 
@@ -67,6 +68,7 @@ export class EndlessGame implements GameSession {
   private captureTimer = 0;
   private lastColdKey = '';
   private bestScore = 0;
+  private autopilot = false;
 
   constructor(private readonly container: HTMLElement, private readonly options: EndlessGameOptions) {
     this.settings = loadSettings();
@@ -274,7 +276,9 @@ export class EndlessGame implements GameSession {
 
     const playerInput = this.finished
       ? { throttle: 0, steer: 0, brake: false, handbrake: false }
-      : { throttle: input.throttle, steer: input.steering, brake: input.brake, handbrake: input.handbrake };
+      : this.autopilot
+        ? driveAlong(this.director.car, this.director.track, { avoid: this.director.obstacles.obstacles })
+        : { throttle: input.throttle, steer: input.steering, brake: input.brake, handbrake: input.handbrake };
     this.director.update(dt * this.timeScale, playerInput);
 
     // impacts → feedback
@@ -391,6 +395,12 @@ export class EndlessGame implements GameSession {
     this.environment.setProgress(0);
     this.store.emit();
     this.resume();
+  }
+
+  /** Development aid: let the bot drive (used by the headless playtest). */
+  public setAutopilot(on: boolean): void {
+    if (process.env.NODE_ENV === 'production') return;
+    this.autopilot = on;
   }
 
   public isPaused(): boolean { return this.paused; }

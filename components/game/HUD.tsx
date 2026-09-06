@@ -224,7 +224,7 @@ function HUDInner({ store, minimap, isMobile, mode, speedLines }: HUDProps) {
 
       {/* bottom-left: minimap, or the rival gauge */}
       {endless ? (
-        <div ref={gaugeRef} className={`absolute bottom-3 left-3 glass px-4 py-3 ${isMobile ? 'w-44 scale-90 origin-bottom-left' : 'w-64'}`} style={{ borderWidth: 1 }}>
+        <div ref={gaugeRef} className={`absolute left-3 glass px-4 py-3 ${isMobile ? 'top-[92px] w-40 scale-90 origin-top-left' : 'bottom-3 w-64'}`} style={{ borderWidth: 1 }}>
           <div className="flex items-baseline justify-between">
             <div className="text-label uppercase text-muted">Rival</div>
             <div ref={gapRef} className="text-lg font-bold italic leading-none hud-num text-lime">60 m</div>

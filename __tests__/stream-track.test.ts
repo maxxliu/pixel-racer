@@ -2,7 +2,7 @@ import { StreamTrack } from '@/lib/game/endless/StreamTrack';
 import { SegmentGenerator } from '@/lib/game/endless/SegmentGenerator';
 import { ENDLESS_TUNING } from '@/lib/game/endless/tuning';
 import { ArcadeCar } from '@/lib/game/ArcadeCar';
-import { driveAlong } from './helpers/streamBot';
+import { driveAlong } from '@/lib/game/endless/EndlessBot';
 
 const T = ENDLESS_TUNING;
 
@@ -173,5 +173,26 @@ describe('StreamTrack', () => {
       track.ensureAhead(car.splineS + T.windowAhead);
     }
     expect(Math.abs(car.lateral)).toBeLessThan(track.halfWidthAt(car.splineIndex) + 4);
+  });
+});
+
+describe('wall tunnelling', () => {
+  test('a steep 150 km/h hit never puts the car through the barrier', () => {
+    const track = new StreamTrack(17);
+    track.ensureAhead(1200);
+    for (const angle of [0.6, 0.9, 1.2]) {
+      const car = new ArcadeCar(track);
+      const p = track.sampleAt(120);
+      const heading = Math.atan2(p.tx, p.tz) - angle; // aimed at the right-hand wall
+      car.place(p.x, p.z, heading);
+      const v = 42;
+      car.vx = Math.sin(heading) * v; car.vz = Math.cos(heading) * v;
+      for (let i = 0; i < 60; i++) {
+        car.step(1 / 60, { throttle: 1, steer: 0, brake: false, handbrake: false });
+        track.ensureAhead(car.splineS + T.windowAhead);
+        const hw = track.halfWidthAt(car.splineIndex);
+        expect(Math.abs(car.lateral)).toBeLessThan(hw + 2.6 + 0.2);
+      }
+    }
   });
 });

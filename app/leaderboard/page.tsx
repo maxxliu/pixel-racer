@@ -12,7 +12,7 @@ const MODE_LABEL: Record<Mode, string> = { 'time-trial': 'Time trial', race: 'Ra
 const formatDistance = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.floor(m)} m`);
 
 export default function LeaderboardPage() {
-  const [mode, setMode] = useState<Mode>('time-trial');
+  const [mode, setMode] = useState<Mode>('endless');
   const [entries, setEntries] = useState<RankedScore[]>([]);
 
   useEffect(() => { setEntries(getScores({ mode })); }, [mode]);

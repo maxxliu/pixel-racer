@@ -2,7 +2,7 @@ import { StreamTrack } from '@/lib/game/endless/StreamTrack';
 import { Pursuer, type PursuerTarget } from '@/lib/game/endless/Pursuer';
 import { EndlessDirector, type EndlessEvent } from '@/lib/game/endless/EndlessDirector';
 import { ENDLESS_TUNING } from '@/lib/game/endless/tuning';
-import { driveAlong, cornerLimitAt } from './helpers/streamBot';
+import { driveAlong, cornerLimitAt } from '@/lib/game/endless/EndlessBot';
 
 const T = ENDLESS_TUNING;
 const DT = 1 / 60;

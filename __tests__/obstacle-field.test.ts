@@ -2,7 +2,7 @@ import { StreamTrack } from '@/lib/game/endless/StreamTrack';
 import { ObstacleField, OBSTACLE_SPECS, type Obstacle, type ObstacleEvent } from '@/lib/game/endless/ObstacleField';
 import { ENDLESS_TUNING, bandAt } from '@/lib/game/endless/tuning';
 import { ArcadeCar, CAR_TUNING } from '@/lib/game/ArcadeCar';
-import { driveAlong } from './helpers/streamBot';
+import { driveAlong } from '@/lib/game/endless/EndlessBot';
 
 const T = ENDLESS_TUNING;
 const DT = 1 / 60;

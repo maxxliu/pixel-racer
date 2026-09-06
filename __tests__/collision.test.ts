@@ -41,3 +41,17 @@ describe('Collision helpers', () => {
     expect(hash.query(105, 100, 2)).toContain(1);
   });
 });
+
+describe('swept wall collision', () => {
+  test('a probe that jumps behind the wall in one step is pushed back to the road side', async () => {
+    const { sweptCircleVsSegment } = await import('@/lib/game/Collision');
+    const wall: Segment = { ax: 0, az: 0, bx: 10, bz: 0, nx: 0, nz: 1 };
+    // moving from z=0.8 (in front) to z=-1.2 (behind): crossed the plane inside the segment
+    const hit = sweptCircleVsSegment(5, 0.8, 5.2, -1.2, 1, wall);
+    expect(hit).not.toBeNull();
+    expect(hit!.depth).toBeCloseTo(2.2);
+    // crossing beyond the segment's ends is not a hit; already behind is not a hit either
+    expect(sweptCircleVsSegment(14, 0.8, 14, -1.2, 1, wall)).toBeNull();
+    expect(sweptCircleVsSegment(5, -3, 5, -4, 1, wall)).toBeNull();
+  });
+});

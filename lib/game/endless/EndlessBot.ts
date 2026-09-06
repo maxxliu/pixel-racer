@@ -1,9 +1,14 @@
-import type { ArcadeCar, CarInput } from '@/lib/game/ArcadeCar';
-import { CAR_TUNING } from '@/lib/game/ArcadeCar';
-import type { Road } from '@/lib/game/Road';
-import type { Obstacle } from '@/lib/game/endless/ObstacleField';
-import { OBSTACLE_SPECS } from '@/lib/game/endless/ObstacleField';
-import { ENDLESS_TUNING } from '@/lib/game/endless/tuning';
+/**
+ * A simple bot for the endless road: pursuit steering toward the widest clear lane,
+ * throttle planned from the curvature ahead. Used by the tests and by the
+ * development autopilot (`window.__pixelRacer.setAutopilot(true)`).
+ */
+import type { ArcadeCar, CarInput } from '../ArcadeCar';
+import { CAR_TUNING } from '../ArcadeCar';
+import type { Road } from '../Road';
+import type { Obstacle } from './ObstacleField';
+import { OBSTACLE_SPECS } from './ObstacleField';
+import { ENDLESS_TUNING } from './tuning';
 
 /** Corner speed limit at `s` for a car doing `v`, using the rival's grip and braking budget. */
 export function cornerLimitAt(road: Road, s: number, v: number): number {
@@ -41,10 +46,7 @@ export function clearLane(car: ArcadeCar, road: Road, obstacles: Obstacle[], loo
   return Math.max(b.lo, Math.min(b.hi, car.lateral));
 }
 
-/**
- * A minimal centreline follower for tests: pursuit steering toward a look-ahead
- * point at `lateral`, throttle planned from the curvature ahead.
- */
+/** Pursuit steering toward a look-ahead point (in the clear lane when `avoid` is given). */
 export function driveAlong(car: ArcadeCar, road: Road, opts: { lateral?: number; speedScale?: number; avoid?: Obstacle[] } = {}): CarInput {
   const v = Math.max(0, car.forwardSpeed);
   const lookahead = 7 + v * 0.5;
