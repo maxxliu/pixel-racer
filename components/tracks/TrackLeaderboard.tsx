@@ -1,51 +1,41 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { LeaderboardEntry } from '@/lib/supabase/types';
+import { getScores, subscribeScores, type RankedScore, type GameModeName } from '@/lib/scores';
 import { formatTime } from '@/lib/utils/format';
 import { Label } from '@/components/ui/Panel';
 
-type Mode = 'time-trial' | 'race' | null;
-
+/** Best times set on this device for one track. */
 export default function TrackLeaderboard({ trackId, limit = 10 }: { trackId: string; limit?: number }) {
-  const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<Mode>('time-trial');
+  const [mode, setMode] = useState<GameModeName>('time-trial');
+  const [entries, setEntries] = useState<RankedScore[]>([]);
 
   useEffect(() => {
-    const ctrl = new AbortController();
-    setEntries(null);
-    setError(null);
-    const params = new URLSearchParams({ limit: String(limit) });
-    if (mode) params.set('mode', mode);
-    fetch(`/api/tracks/${trackId}/leaderboard?${params}`, { signal: ctrl.signal })
-      .then(async (r) => { if (!r.ok) throw new Error('Failed to load leaderboard'); setEntries(await r.json()); })
-      .catch((e: Error) => { if (e.name !== 'AbortError') setError(e.message); });
-    return () => ctrl.abort();
-  }, [trackId, limit, mode]);
+    const load = () => setEntries(getScores({ trackId, mode }).slice(0, limit));
+    load();
+    return subscribeScores(load);
+  }, [trackId, mode, limit]);
 
   return (
     <div className="glass p-5">
       <div className="mb-3 flex items-center justify-between">
-        <Label>Leaderboard</Label>
+        <Label>Best times</Label>
         <div className="flex gap-1 rounded-lg bg-ink/60 p-1">
-          {([['time-trial', 'Time trial'], ['race', 'Race'], [null, 'All']] as [Mode, string][]).map(([m, label]) => (
-            <button key={label} type="button" onClick={() => setMode(m)} aria-pressed={mode === m}
+          {(['time-trial', 'race'] as GameModeName[]).map((m) => (
+            <button key={m} type="button" onClick={() => setMode(m)} aria-pressed={mode === m}
               className={`rounded-md px-2.5 py-1 font-display text-[11px] font-bold uppercase tracking-wider ${mode === m ? 'bg-coral text-ink' : 'text-muted hover:text-cream'}`}>
-              {label}
+              {m === 'time-trial' ? 'Time trial' : 'Race'}
             </button>
           ))}
         </div>
       </div>
-      {error && <p className="text-sm text-coral">{error}</p>}
-      {!error && entries === null && <p className="text-sm text-muted anim-pulse-soft">Loading…</p>}
-      {!error && entries && entries.length === 0 && <p className="text-sm text-muted">No times yet. Be the first.</p>}
-      {!error && entries && entries.length > 0 && (
+      {entries.length === 0 && <p className="text-sm text-muted">No times yet. Set the first one.</p>}
+      {entries.length > 0 && (
         <ol className="space-y-1 text-sm">
-          {entries.map((e, i) => (
-            <li key={e.id} className="flex items-center justify-between rounded-md bg-ink/40 px-3 py-1.5">
-              <span><span className={`mr-2 font-display font-bold hud-num ${i === 0 ? 'text-sun' : i === 1 ? 'text-cream' : i === 2 ? 'text-[#ff8a5b]' : 'text-muted'}`}>{i + 1}</span>{e.player_name}</span>
-              <span className="hud-num">{formatTime(e.time_ms)}</span>
+          {entries.map((e) => (
+            <li key={`${e.date}-${e.time}`} className="flex items-center justify-between rounded-md bg-ink/40 px-3 py-1.5">
+              <span><span className={`mr-2 font-display font-bold hud-num ${e.rank === 1 ? 'text-sun' : e.rank === 2 ? 'text-cream' : e.rank === 3 ? 'text-[#ff8a5b]' : 'text-muted'}`}>{e.rank}</span>{e.playerName}<span className="ml-2 text-xs text-muted">{e.laps} lap{e.laps === 1 ? '' : 's'}</span></span>
+              <span className="hud-num">{formatTime(e.time)}</span>
             </li>
           ))}
         </ol>

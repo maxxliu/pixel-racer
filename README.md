@@ -1,6 +1,6 @@
 # Pixel Racer
 
-A sunset arcade racer for the browser. Drift, boost, and chase the best lap on the built-in circuit or on tracks you draw yourself.
+A sunset arcade racer for the browser. Drift, boost, and chase the best lap on the built-in Sunset Circuit or on tracks you draw yourself. Everything runs client-side: tracks and best times are saved in your browser, and there is no backend.
 
 ## Play
 
@@ -15,7 +15,7 @@ A sunset arcade racer for the browser. Drift, boost, and chase the best lap on t
 | Pause | `Esc` | Start | ⏸ |
 | Mute | `M` | — | — |
 
-Longer drifts charge bigger boosts (blue → orange → purple sparks). Press the throttle right as the lights go green for a perfect start. Every checkpoint must be passed in order for a lap to count.
+Longer drifts charge bigger boosts (blue → orange → purple sparks). Press the throttle right as the lights go green for a perfect start. Every checkpoint must be passed in order for a lap to count. Laps, opponents, difficulty, quality, camera and audio live in Settings.
 
 ## Develop
 
@@ -28,16 +28,13 @@ npm test
 npm run build
 ```
 
-`?laps=N` on `/play` overrides the lap count in development builds only. In development, `window.__pixelRacer` exposes the running game and `setAutopilot(true)` lets the AI drive the player car for testing.
+In development, `?laps=N` on `/play` overrides the lap count, and `window.__pixelRacer` exposes the running game (`setAutopilot(true)` lets the AI drive the player car).
 
-### Layout
+## Layout
 
-- `lib/game/` — simulation core: `TrackSpline` (sampled centreline, walls, gates), `ArcadeCar` (physics), `RaceDirector` (countdown, laps, positions), `ai/AIDriver`, and the three.js layer (`Engine`, `Environment`, `TrackMeshBuilder`, `CarMesh`, `Effects`, `CameraRig`).
-- `lib/audio/` — fully synthesized Web Audio engine (no assets).
-- `lib/track/` — drawing pipeline: path processing, curvature analysis, validation, procedural generation, server-side thumbnails.
+- `lib/game/` — simulation: `TrackSpline` (sampled centreline, walls, checkpoint gates), `ArcadeCar` (physics), `RaceDirector` (countdown, laps, positions), `ai/AIDriver`, and the three.js layer (`Engine`, `Environment`, `TrackMeshBuilder`, `CarMesh`, `Effects`, `CameraRig`).
+- `lib/audio/` — synthesized Web Audio engine, no assets.
+- `lib/track/` — drawing pipeline: path processing, curvature analysis, validation, procedural generation, thumbnails.
+- `lib/tracks.ts`, `lib/scores.ts`, `lib/settings.ts` — browser storage for tracks, results and settings.
 - `components/` — React UI. The HUD reads hot values from `GameStore` at render rate without re-rendering React.
-- `app/api/` — track library and leaderboard routes (Supabase). All inputs are validated in `lib/api/validate.ts`.
-
-### Online features (optional)
-
-The track library and online leaderboards need a Supabase project. Copy `.env.example` to `.env.local`, fill in the two public keys, and apply the migrations in `supabase/migrations/` (or run `node scripts/run-migration.js` with `POSTGRES_URL` set). Without them the game still runs; library pages explain that publishing is unavailable.
+- `__tests__/` — behavioural Jest tests for the simulation, track geometry, race logic, input and storage.

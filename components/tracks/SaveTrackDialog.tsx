@@ -19,7 +19,7 @@ export default function SaveTrackDialog({ open, onClose, onSave, saving, error }
   });
   const valid = name.trim().length > 0 && author.trim().length > 0;
   return (
-    <Modal open={open} onClose={saving ? undefined : onClose} title="Publish track">
+    <Modal open={open} onClose={saving ? undefined : onClose} title="Save track">
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (valid && !saving) void onSave(name.trim(), author.trim()); }}>
         <label className="block">
           <span className="mb-1 block text-xs uppercase tracking-wider text-muted">Track name</span>
@@ -33,7 +33,7 @@ export default function SaveTrackDialog({ open, onClose, onSave, saving, error }
         {error && <p className="text-sm text-coral">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <Button onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button type="submit" variant="primary" disabled={!valid || saving}>{saving ? 'Publishing…' : 'Publish'}</Button>
+          <Button type="submit" variant="primary" disabled={!valid || saving}>{saving ? 'Saving…' : 'Save'}</Button>
         </div>
       </form>
     </Modal>

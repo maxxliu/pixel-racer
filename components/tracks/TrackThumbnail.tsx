@@ -1,9 +1,8 @@
 'use client';
 
 /**
- * Renders a server-generated thumbnail SVG. The API only ever stores SVGs it
- * produced itself from numeric waypoints, and the string is additionally
- * checked here so a stray script tag can never be inlined.
+ * Renders a thumbnail SVG produced by generateThumbnailSvg(). The string is
+ * checked against the exact shape that generator emits before being inlined.
  */
 const SAFE_SVG = /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"[^>]*>(?:<(?:rect|path|circle)\b[^>]*\/>)*<\/svg>$/;
 

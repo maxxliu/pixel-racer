@@ -13,6 +13,7 @@ import { validateWaypoints } from '@/lib/game/TrackSpline';
 import { TouchInputHandler } from '@/lib/input/TouchInputHandler';
 import type { InputManager } from '@/lib/input/InputManager';
 import { useSettings } from '@/lib/settings';
+import { BUILTIN_TRACK_ID } from '@/lib/tracks';
 import { LinkButton } from '@/components/ui/Button';
 
 interface GameCanvasProps {
@@ -47,7 +48,7 @@ export default function GameCanvas({ gameMode = 'time-trial', customTrack = fals
   const [store, setStore] = useState<GameStore | null>(null);
   const [minimap, setMinimap] = useState<MinimapData | null>(null);
   const [inputManager, setInputManager] = useState<InputManager | null>(null);
-  const [trackId, setTrackId] = useState<string | undefined>(undefined);
+  const [trackInfo, setTrackInfo] = useState<{ id: string; name: string }>({ id: BUILTIN_TRACK_ID, name: 'Sunset Circuit' });
   const [isMobile, setIsMobile] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [session, setSession] = useState(0);
@@ -67,7 +68,7 @@ export default function GameCanvas({ gameMode = 'time-trial', customTrack = fals
         return;
       }
       track = t;
-      setTrackId(t.id);
+      setTrackInfo({ id: t.id ?? `custom-${t.waypoints.length}`, name: t.name ?? 'Custom track' });
     }
     setStatus('loading');
     setResults(null);
@@ -154,7 +155,7 @@ export default function GameCanvas({ gameMode = 'time-trial', customTrack = fals
       )}
 
       {status === 'finished' && results && (
-        <RaceComplete results={results} trackId={trackId} onPlayAgain={playAgain} onMainMenu={exit} />
+        <RaceComplete results={results} trackId={trackInfo.id} trackName={trackInfo.name} onPlayAgain={playAgain} onMainMenu={exit} />
       )}
     </div>
   );

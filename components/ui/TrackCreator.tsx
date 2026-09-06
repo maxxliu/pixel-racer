@@ -15,6 +15,7 @@ import { generateTrack, generateOvalTrack } from '@/lib/track/ProceduralTrackGen
 import { TrackSpline, validateWaypoints } from '@/lib/game/TrackSpline';
 import { formatTrackLength } from '@/lib/utils/format';
 import { getDifficultyColor } from '@/lib/game/TrackSerializer';
+import { saveTrack, stageTrack } from '@/lib/tracks';
 
 type Mode = 'draw' | 'generate';
 type GenDifficulty = 'easy' | 'medium' | 'hard' | 'expert';
@@ -88,7 +89,7 @@ export default function TrackCreator() {
 
   const play = (raceMode: 'time-trial' | 'race') => {
     if (!validation?.isValid || waypoints.length === 0) return;
-    sessionStorage.setItem('customTrack', JSON.stringify({ waypoints, startPosition: startFor(waypoints), name: 'Custom track' }));
+    stageTrack({ name: 'Custom track', waypoints, startPosition: startFor(waypoints) });
     router.push(`/play?mode=${raceMode}&custom=true`);
   };
 
@@ -96,22 +97,11 @@ export default function TrackCreator() {
     if (!validation?.isValid || waypoints.length === 0) return;
     setSaving(true);
     setSaveError(null);
-    try {
-      try { localStorage.setItem('pixel-racer-name', author); } catch { /* ignore */ }
-      const res = await fetch('/api/tracks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, author_name: author, waypoints, start_position: startFor(waypoints) }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 503) throw new Error('Publishing needs a database connection. You can still play the track locally.');
-      if (!res.ok) throw new Error(data.error || `Could not publish (${res.status})`);
-      router.push(`/tracks/${data.id}`);
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : 'Could not publish');
-    } finally {
-      setSaving(false);
-    }
+    try { localStorage.setItem('pixel-racer-name', author); } catch { /* ignore */ }
+    const result = saveTrack({ name, author, waypoints, startPosition: startFor(waypoints) });
+    setSaving(false);
+    if ('error' in result) { setSaveError(result.error); return; }
+    router.push(`/tracks/${result.id}`);
   };
 
   const bounds = useMemo(() => {
@@ -123,7 +113,7 @@ export default function TrackCreator() {
   }, [waypoints]);
 
   return (
-    <PageShell title="Create a track" subtitle="Draw a closed loop or generate one, then race it. Publish it to the library to get a leaderboard." back={{ href: '/', label: 'Menu' }}>
+    <PageShell title="Create a track" subtitle="Draw a closed loop or generate one, then race it. Save it to your library to keep best times for it." back={{ href: '/', label: 'Menu' }}>
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <div className="mb-4 flex gap-1 rounded-lg bg-ink/60 p-1 w-fit" role="tablist">
@@ -170,7 +160,7 @@ export default function TrackCreator() {
             <div className="mt-4 flex flex-wrap gap-2">
               <Button variant="primary" size="lg" onClick={() => play('time-trial')}>Time trial</Button>
               <Button size="lg" onClick={() => play('race')}>Race vs AI</Button>
-              <Button size="lg" onClick={() => { setSaveError(null); setSaveOpen(true); }}>Publish</Button>
+              <Button size="lg" onClick={() => { setSaveError(null); setSaveOpen(true); }}>Save to library</Button>
             </div>
           )}
         </div>
