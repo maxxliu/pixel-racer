@@ -111,7 +111,7 @@ function HUDInner({ store, minimap, isMobile, mode, speedLines }: HUDProps) {
       </div>
 
       {/* bottom-right: speed */}
-      <div className={`absolute bottom-3 right-3 flex items-end gap-3 ${isMobile ? 'bottom-2 left-1/2 right-auto -translate-x-1/2 scale-[0.7] origin-bottom' : ''}`}>
+      <div className={`absolute bottom-3 right-3 flex items-end gap-3 ${isMobile ? 'bottom-2 left-[40%] right-auto -translate-x-1/2 scale-[0.7] origin-bottom' : ''}`}>
         <div className="glass relative flex h-36 w-36 items-center justify-center rounded-full">
           <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full -rotate-[135deg]">
             <circle cx="50" cy="50" r="44" fill="none" stroke="rgba(255,247,239,0.12)" strokeWidth="6" strokeDasharray={`${2 * Math.PI * 44 * 0.75} ${2 * Math.PI * 44}`} strokeLinecap="round" />
