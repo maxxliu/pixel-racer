@@ -81,7 +81,7 @@ export class Pursuer implements CarVisualState, CarFxState {
 
   /** 0 = at or beyond the comfort gap, 1 = alongside. */
   public get danger(): number {
-    return Math.min(1, Math.max(0, 1 - this.gap / 12));
+    return Math.min(1, Math.max(0, 1 - this.gap / 10));
   }
 
   public on(listener: (e: PursuerEvent) => void): () => void {
