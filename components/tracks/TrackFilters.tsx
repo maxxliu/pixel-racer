@@ -2,7 +2,7 @@
 
 import type { Difficulty } from '@/lib/supabase/types';
 
-export type SortOption = 'play_count' | 'created_at' | 'track_length_m';
+export type SortOption = 'play_count' | 'created_at' | 'track_length_m' | 'turn_count';
 export type SortOrder = 'asc' | 'desc';
 
 interface TrackFiltersProps {
@@ -16,76 +16,40 @@ interface TrackFiltersProps {
   onSearchChange: (search: string) => void;
 }
 
-export default function TrackFilters({
-  difficulty,
-  sort,
-  order,
-  search,
-  onDifficultyChange,
-  onSortChange,
-  onOrderChange,
-  onSearchChange
-}: TrackFiltersProps) {
-  const difficulties: (Difficulty | null)[] = [null, 'easy', 'medium', 'hard', 'expert'];
-  const sortOptions: { value: SortOption; label: string }[] = [
-    { value: 'play_count', label: 'Most Played' },
-    { value: 'created_at', label: 'Newest' },
-    { value: 'track_length_m', label: 'Length' }
-  ];
+const DIFFICULTIES: (Difficulty | null)[] = [null, 'easy', 'medium', 'hard', 'expert'];
+const SORTS: { value: SortOption; label: string }[] = [
+  { value: 'play_count', label: 'Most played' },
+  { value: 'created_at', label: 'Newest' },
+  { value: 'track_length_m', label: 'Length' },
+  { value: 'turn_count', label: 'Turns' },
+];
 
+export default function TrackFilters({ difficulty, sort, order, search, onDifficultyChange, onSortChange, onOrderChange, onSearchChange }: TrackFiltersProps) {
   return (
-    <div className="pixel-panel mb-6">
-      <div className="flex flex-wrap gap-4 items-center">
-        {/* Search */}
-        <div className="flex-1 min-w-[200px]">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search tracks..."
-            className="w-full bg-pixel-black border-2 border-pixel-gray text-white px-3 py-2 font-pixel-body text-sm"
-          />
-        </div>
-
-        {/* Difficulty Filter */}
-        <div className="flex gap-1 flex-wrap">
-          {difficulties.map((diff) => (
-            <button
-              key={diff || 'all'}
-              onClick={() => onDifficultyChange(diff)}
-              className={`px-3 py-1 text-xs font-pixel border-2 transition-colors
-                ${difficulty === diff
-                  ? 'bg-pixel-red border-white text-white'
-                  : 'bg-pixel-dark border-pixel-gray text-pixel-gray hover:border-white hover:text-white'
-                }`}
-            >
-              {diff ? diff.charAt(0).toUpperCase() + diff.slice(1) : 'All'}
-            </button>
-          ))}
-        </div>
-
-        {/* Sort */}
-        <div className="flex items-center gap-2">
-          <select
-            value={sort}
-            onChange={(e) => onSortChange(e.target.value as SortOption)}
-            className="bg-pixel-black border-2 border-pixel-gray text-white px-2 py-1 font-pixel-body text-sm"
-          >
-            {sortOptions.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-
-          <button
-            onClick={() => onOrderChange(order === 'asc' ? 'desc' : 'asc')}
-            className="px-2 py-1 bg-pixel-dark border-2 border-pixel-gray text-white text-sm"
-            title={order === 'asc' ? 'Ascending' : 'Descending'}
-          >
-            {order === 'asc' ? '↑' : '↓'}
+    <div className="glass mb-6 flex flex-wrap items-center gap-3 p-3">
+      <input
+        type="search"
+        value={search}
+        onChange={(e) => onSearchChange(e.target.value)}
+        placeholder="Search tracks"
+        aria-label="Search tracks"
+        className="input min-w-[180px] flex-1"
+      />
+      <div className="flex gap-1 rounded-lg bg-ink/60 p-1" role="group" aria-label="Difficulty">
+        {DIFFICULTIES.map((d) => (
+          <button key={d ?? 'all'} type="button" onClick={() => onDifficultyChange(d)} aria-pressed={difficulty === d}
+            className={`rounded-md px-3 py-1.5 font-display text-xs font-bold uppercase tracking-wider ${difficulty === d ? 'bg-coral text-ink' : 'text-muted hover:text-cream'}`}>
+            {d ?? 'All'}
           </button>
-        </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-2">
+        <select value={sort} onChange={(e) => onSortChange(e.target.value as SortOption)} aria-label="Sort by" className="input w-auto py-2">
+          {SORTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <button type="button" onClick={() => onOrderChange(order === 'asc' ? 'desc' : 'asc')} aria-label={order === 'asc' ? 'Ascending' : 'Descending'} className="input w-10 py-2 text-center">
+          {order === 'asc' ? '↑' : '↓'}
+        </button>
       </div>
     </div>
   );

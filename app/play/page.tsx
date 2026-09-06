@@ -11,11 +11,12 @@ const GameCanvas = dynamic(() => import('@/components/game/GameCanvas'), {
 });
 
 function PlayContent() {
-  const searchParams = useSearchParams();
-  const mode = searchParams.get('mode') || 'time-trial';
-  const custom = searchParams.get('custom') === 'true';
-
-  return <GameCanvas gameMode={mode as 'time-trial' | 'race'} customTrack={custom} />;
+  const params = useSearchParams();
+  const mode = params.get('mode') === 'race' ? 'race' : 'time-trial';
+  const custom = params.get('custom') === 'true';
+  const laps = Number(params.get('laps'));
+  const lapsOverride = process.env.NODE_ENV !== 'production' && Number.isFinite(laps) && laps >= 1 ? Math.floor(laps) : undefined;
+  return <GameCanvas gameMode={mode} customTrack={custom} lapsOverride={lapsOverride} />;
 }
 
 export default function PlayPage() {

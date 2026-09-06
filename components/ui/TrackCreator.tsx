@@ -1,500 +1,220 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DrawingCanvas from './DrawingCanvas';
+import SaveTrackDialog from '@/components/tracks/SaveTrackDialog';
+import { PageShell } from '@/components/ui/PageShell';
+import { Button } from '@/components/ui/Button';
+import { Label } from '@/components/ui/Panel';
 import type { Point2D } from '@/lib/track/TrackGeometryUtils';
-import type { TrackWaypoint } from '@/lib/game/TrackBuilder';
+import type { TrackWaypoint } from '@/lib/game/types';
 import { processDrawingToWaypoints } from '@/lib/track/PathProcessor';
-import { validateTrack, ValidationResult } from '@/lib/track/TrackValidator';
+import { validateTrack, type ValidationResult } from '@/lib/track/TrackValidator';
 import { generateTrack, generateOvalTrack } from '@/lib/track/ProceduralTrackGenerator';
-import { serializeTrack } from '@/lib/game/TrackSerializer';
-import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
+import { TrackSpline, validateWaypoints } from '@/lib/game/TrackSpline';
+import { formatTrackLength } from '@/lib/utils/format';
+import { getDifficultyColor } from '@/lib/game/TrackSerializer';
 
-type CreatorMode = 'draw' | 'generate';
-type GenerateDifficulty = 'easy' | 'medium' | 'hard' | 'expert';
+type Mode = 'draw' | 'generate';
+type GenDifficulty = 'easy' | 'medium' | 'hard' | 'expert';
+
+function startFor(waypoints: TrackWaypoint[]) {
+  try {
+    const s = new TrackSpline(waypoints).start;
+    return { x: s.x, z: s.z, rotation: s.rotation };
+  } catch {
+    return { x: waypoints[0].x, z: waypoints[0].z, rotation: 0 };
+  }
+}
 
 export default function TrackCreator() {
   const router = useRouter();
-  const [clearTrigger, setClearTrigger] = useState(0);
-
-  const [mode, setMode] = useState<CreatorMode>('draw');
-  const [rawPoints, setRawPoints] = useState<Point2D[]>([]);
+  const [mode, setMode] = useState<Mode>('draw');
+  const [strokes, setStrokes] = useState<Point2D[][]>([]);
   const [waypoints, setWaypoints] = useState<TrackWaypoint[]>([]);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-
-  // Generate mode options
-  const [generateDifficulty, setGenerateDifficulty] = useState<GenerateDifficulty>('medium');
-
-  // Save dialog
-  const [showSaveDialog, setShowSaveDialog] = useState(false);
-  const [trackName, setTrackName] = useState('');
-  const [authorName, setAuthorName] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [genDifficulty, setGenDifficulty] = useState<GenDifficulty>('medium');
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Handle points change from drawing
-  const handlePointsChange = useCallback((points: Point2D[]) => {
-    setRawPoints(points);
+  const rawPoints = useMemo(() => strokes.flat(), [strokes]);
+
+  const applyWaypoints = useCallback((wps: TrackWaypoint[]) => {
+    const v = validateTrack(wps.map((w) => ({ x: w.x, z: w.z })), wps.map((w) => w.width));
+    const splineErr = validateWaypoints(wps);
+    if (splineErr && v.isValid) {
+      v.isValid = false;
+      v.errors.push({ type: 'invalid_geometry', message: splineErr });
+    }
+    setWaypoints(wps);
+    setValidation(v);
+  }, []);
+
+  const handleStrokes = useCallback((s: Point2D[][]) => {
+    setStrokes(s);
     setWaypoints([]);
     setValidation(null);
   }, []);
 
-  // Process drawn points into waypoints
-  const handleProcessTrack = useCallback(async () => {
-    if (rawPoints.length < 10) {
-      setValidation({
-        isValid: false,
-        errors: [{ type: 'too_few_points', message: 'Draw more of a track path' }],
-        warnings: [],
-        stats: { length: 0, pointCount: rawPoints.length, turnCount: 0, avgWidth: 14, minWidth: 14, difficulty: 'easy', bounds: { width: 0, height: 0 }, isClosed: false }
-      });
-      return;
-    }
+  const undo = () => handleStrokes(strokes.slice(0, -1));
+  const clear = () => handleStrokes([]);
 
-    setIsProcessing(true);
-
+  const process = useCallback(async () => {
+    if (rawPoints.length < 10) return;
+    setBusy(true);
+    await new Promise((r) => setTimeout(r, 30));
     try {
-      // Process in a setTimeout to allow UI to update
-      await new Promise(resolve => setTimeout(resolve, 50));
-
-      const processed = processDrawingToWaypoints(rawPoints);
-      const validationResult = validateTrack(
-        processed.map(wp => ({ x: wp.x, z: wp.z })),
-        processed.map(wp => wp.width)
-      );
-
-      setWaypoints(processed);
-      setValidation(validationResult);
-    } catch (error) {
-      console.error('Error processing track:', error);
-      setValidation({
-        isValid: false,
-        errors: [{ type: 'invalid_geometry', message: 'Failed to process track' }],
-        warnings: [],
-        stats: { length: 0, pointCount: rawPoints.length, turnCount: 0, avgWidth: 14, minWidth: 14, difficulty: 'easy', bounds: { width: 0, height: 0 }, isClosed: false }
-      });
+      applyWaypoints(processDrawingToWaypoints(rawPoints));
+    } catch {
+      setValidation({ isValid: false, errors: [{ type: 'invalid_geometry', message: 'Could not build a track from that drawing.' }], warnings: [], stats: { length: 0, pointCount: rawPoints.length, turnCount: 0, avgWidth: 0, minWidth: 0, difficulty: 'easy', bounds: { width: 0, height: 0 }, isClosed: false } });
     } finally {
-      setIsProcessing(false);
+      setBusy(false);
     }
-  }, [rawPoints]);
+  }, [rawPoints, applyWaypoints]);
 
-  // Generate procedural track
-  const handleGenerateTrack = useCallback(async () => {
-    setIsProcessing(true);
-
+  const generate = useCallback(async () => {
+    setBusy(true);
+    await new Promise((r) => setTimeout(r, 30));
     try {
-      await new Promise(resolve => setTimeout(resolve, 50));
-
-      const generated = generateTrack({
-        difficulty: generateDifficulty,
-        worldSize: 200,
-        maxAttempts: 15
-      });
-
-      if (generated && generated.length > 0) {
-        setWaypoints(generated);
-        setRawPoints(generated.map(wp => ({ x: wp.x, z: wp.z })));
-
-        const validationResult = validateTrack(
-          generated.map(wp => ({ x: wp.x, z: wp.z })),
-          generated.map(wp => wp.width)
-        );
-        setValidation(validationResult);
-      } else {
-        // Fallback to oval track
-        const oval = generateOvalTrack(200);
-        setWaypoints(oval);
-        setRawPoints(oval.map(wp => ({ x: wp.x, z: wp.z })));
-
-        const validationResult = validateTrack(
-          oval.map(wp => ({ x: wp.x, z: wp.z })),
-          oval.map(wp => wp.width)
-        );
-        setValidation(validationResult);
-      }
-    } catch (error) {
-      console.error('Error generating track:', error);
+      const generated = generateTrack({ difficulty: genDifficulty, worldSize: 200, maxAttempts: 15 });
+      applyWaypoints(generated && generated.length > 0 ? generated : generateOvalTrack(200));
     } finally {
-      setIsProcessing(false);
+      setBusy(false);
     }
-  }, [generateDifficulty]);
+  }, [genDifficulty, applyWaypoints]);
 
-  // Clear everything
-  const handleClear = useCallback(() => {
-    setClearTrigger(prev => prev + 1);
-    setRawPoints([]);
-    setWaypoints([]);
-    setValidation(null);
-  }, []);
-
-  // Play the track
-  const handlePlayTrack = useCallback(() => {
+  const play = (raceMode: 'time-trial' | 'race') => {
     if (!validation?.isValid || waypoints.length === 0) return;
+    sessionStorage.setItem('customTrack', JSON.stringify({ waypoints, startPosition: startFor(waypoints), name: 'Custom track' }));
+    router.push(`/play?mode=${raceMode}&custom=true`);
+  };
 
-    // Store track data in sessionStorage for the play page
-    const trackData = {
-      waypoints,
-      startPosition: {
-        x: waypoints[0].x,
-        z: waypoints[0].z,
-        rotation: Math.atan2(
-          waypoints[1].x - waypoints[0].x,
-          waypoints[1].z - waypoints[0].z
-        )
-      }
-    };
-
-    sessionStorage.setItem('customTrack', JSON.stringify(trackData));
-    router.push('/play?mode=time-trial&custom=true');
-  }, [validation, waypoints, router]);
-
-  // Save track to database
-  const handleSaveTrack = useCallback(async () => {
+  const save = async (name: string, author: string) => {
     if (!validation?.isValid || waypoints.length === 0) return;
-    if (!trackName.trim() || !authorName.trim()) return;
-
-    if (!isSupabaseConfigured() || !supabase) {
-      setSaveError('Database not configured. Track can only be played locally.');
-      return;
-    }
-
-    setIsSaving(true);
+    setSaving(true);
     setSaveError(null);
-
     try {
-      const startPosition = {
-        x: waypoints[0].x,
-        z: waypoints[0].z,
-        rotation: Math.atan2(
-          waypoints[1].x - waypoints[0].x,
-          waypoints[1].z - waypoints[0].z
-        )
-      };
-
-      const trackInsert = serializeTrack(
-        trackName.trim(),
-        authorName.trim(),
-        waypoints,
-        startPosition
-      );
-
-      const { data, error } = await (supabase as any)
-        .from('tracks')
-        .insert(trackInsert)
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      // Redirect to the track page
-      router.push(`/tracks/${(data as { id: string }).id}`);
-    } catch (error: unknown) {
-      console.error('Error saving track:', error);
-      let errorMessage = 'Unknown error';
-      if (error && typeof error === 'object') {
-        if ('message' in error) errorMessage = String(error.message);
-        if ('details' in error) errorMessage += ` - ${error.details}`;
-      }
-      setSaveError(`Failed to save track: ${errorMessage}`);
+      try { localStorage.setItem('pixel-racer-name', author); } catch { /* ignore */ }
+      const res = await fetch('/api/tracks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, author_name: author, waypoints, start_position: startFor(waypoints) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 503) throw new Error('Publishing needs a database connection. You can still play the track locally.');
+      if (!res.ok) throw new Error(data.error || `Could not publish (${res.status})`);
+      router.push(`/tracks/${data.id}`);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Could not publish');
     } finally {
-      setIsSaving(false);
+      setSaving(false);
     }
-  }, [validation, waypoints, trackName, authorName, router]);
+  };
+
+  const bounds = useMemo(() => {
+    if (waypoints.length === 0) return null;
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const w of waypoints) { minX = Math.min(minX, w.x); maxX = Math.max(maxX, w.x); minZ = Math.min(minZ, w.z); maxZ = Math.max(maxZ, w.z); }
+    const pad = 20;
+    return `${minX - pad} ${minZ - pad} ${maxX - minX + pad * 2} ${maxZ - minZ + pad * 2}`;
+  }, [waypoints]);
 
   return (
-    <div className="min-h-screen bg-pixel-black p-4">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-pixel text-white">Create Track</h1>
-          <button
-            onClick={() => router.push('/')}
-            className="pixel-btn text-sm"
-          >
-            Back
-          </button>
+    <PageShell title="Create a track" subtitle="Draw a closed loop or generate one, then race it. Publish it to the library to get a leaderboard." back={{ href: '/', label: 'Menu' }}>
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <div className="mb-4 flex gap-1 rounded-lg bg-ink/60 p-1 w-fit" role="tablist">
+            {(['draw', 'generate'] as Mode[]).map((m) => (
+              <button key={m} role="tab" aria-selected={mode === m} type="button" onClick={() => setMode(m)}
+                className={`rounded-md px-4 py-2 font-display text-xs font-bold uppercase tracking-wider ${mode === m ? 'bg-coral text-ink' : 'text-muted hover:text-cream'}`}>
+                {m}
+              </button>
+            ))}
+          </div>
+
+          {mode === 'draw' ? (
+            <>
+              <DrawingCanvas strokes={strokes} onStrokesChange={handleStrokes} disabled={busy} />
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button onClick={undo} disabled={busy || strokes.length === 0}>Undo stroke</Button>
+                <Button onClick={clear} disabled={busy || strokes.length === 0}>Clear</Button>
+                <Button variant="primary" onClick={() => void process()} disabled={busy || rawPoints.length < 10}>{busy ? 'Building…' : 'Build track'}</Button>
+              </div>
+            </>
+          ) : (
+            <div className="glass p-5">
+              <Label className="mb-2">Difficulty</Label>
+              <div className="mb-4 flex gap-1 rounded-lg bg-ink/60 p-1 w-fit">
+                {(['easy', 'medium', 'hard', 'expert'] as GenDifficulty[]).map((d) => (
+                  <button key={d} type="button" onClick={() => setGenDifficulty(d)} aria-pressed={genDifficulty === d}
+                    className={`rounded-md px-3 py-1.5 font-display text-xs font-bold uppercase tracking-wider ${genDifficulty === d ? 'bg-coral text-ink' : 'text-muted hover:text-cream'}`}>
+                    {d}
+                  </button>
+                ))}
+              </div>
+              <Button variant="primary" onClick={() => void generate()} disabled={busy}>{busy ? 'Generating…' : 'Generate track'}</Button>
+              {waypoints.length > 0 && bounds && (
+                <svg viewBox={bounds} className="mx-auto mt-5 aspect-square w-full max-w-sm rounded-lg bg-ink/50">
+                  <path d={`M ${waypoints[0].x} ${waypoints[0].z} ${waypoints.slice(1).map((w) => `L ${w.x} ${w.z}`).join(' ')} Z`} fill="none" stroke="#3a3548" strokeWidth={12} strokeLinejoin="round" />
+                  <path d={`M ${waypoints[0].x} ${waypoints[0].z} ${waypoints.slice(1).map((w) => `L ${w.x} ${w.z}`).join(' ')} Z`} fill="none" stroke="#fff7ef" strokeWidth={1.5} strokeDasharray="4 4" opacity={0.6} />
+                  <circle cx={waypoints[0].x} cy={waypoints[0].z} r={5} fill="#c8ff3d" />
+                </svg>
+              )}
+            </div>
+          )}
+
+          {validation?.isValid && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button variant="primary" size="lg" onClick={() => play('time-trial')}>Time trial</Button>
+              <Button size="lg" onClick={() => play('race')}>Race vs AI</Button>
+              <Button size="lg" onClick={() => { setSaveError(null); setSaveOpen(true); }}>Publish</Button>
+            </div>
+          )}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Canvas Area */}
-          <div className="lg:col-span-2">
-            {/* Mode Tabs */}
-            <div className="flex gap-2 mb-4">
-              <button
-                onClick={() => setMode('draw')}
-                className={`pixel-btn text-sm ${mode === 'draw' ? 'pixel-btn-primary' : ''}`}
-              >
-                Draw
-              </button>
-              <button
-                onClick={() => setMode('generate')}
-                className={`pixel-btn text-sm ${mode === 'generate' ? 'pixel-btn-primary' : ''}`}
-              >
-                Generate
-              </button>
-            </div>
-
-            {/* Drawing Canvas */}
-            {mode === 'draw' && (
-              <DrawingCanvas
-                key={clearTrigger}
-                width={600}
-                height={600}
-                onPointsChange={handlePointsChange}
-                disabled={isProcessing}
-              />
-            )}
-
-            {/* Generate Options */}
-            {mode === 'generate' && (
-              <div className="pixel-panel">
-                <h3 className="text-lg font-pixel text-white mb-4">Generation Options</h3>
-
-                <div className="mb-4">
-                  <label className="block text-sm font-pixel-body text-pixel-gray mb-2">
-                    Difficulty
-                  </label>
-                  <div className="flex gap-2 flex-wrap">
-                    {(['easy', 'medium', 'hard', 'expert'] as GenerateDifficulty[]).map(diff => (
-                      <button
-                        key={diff}
-                        onClick={() => setGenerateDifficulty(diff)}
-                        className={`pixel-btn text-xs ${generateDifficulty === diff ? 'pixel-btn-primary' : ''}`}
-                      >
-                        {diff.charAt(0).toUpperCase() + diff.slice(1)}
-                      </button>
-                    ))}
-                  </div>
+        <aside className="space-y-4">
+          <div className="glass p-5">
+            <Label className="mb-3">Track info</Label>
+            {!validation && rawPoints.length === 0 && <p className="text-sm text-muted">{mode === 'draw' ? 'Draw a loop to see stats.' : 'Generate a track to see stats.'}</p>}
+            {!validation && rawPoints.length > 0 && <p className="text-sm text-muted">Press <b className="text-cream">Build track</b> to smooth and validate your drawing.</p>}
+            {validation && (
+              <div className="space-y-3">
+                <div className={`inline-block rounded-md px-2 py-1 font-display text-xs font-bold uppercase tracking-wider ${validation.isValid ? 'bg-lime text-ink' : 'bg-coral text-ink'}`}>
+                  {validation.isValid ? 'Ready to race' : 'Needs work'}
                 </div>
-
-                <button
-                  onClick={handleGenerateTrack}
-                  disabled={isProcessing}
-                  className="pixel-btn pixel-btn-primary w-full"
-                >
-                  {isProcessing ? 'Generating...' : 'Generate Track'}
-                </button>
-
-                {/* Preview of generated track */}
-                {waypoints.length > 0 && (
-                  <div className="mt-4">
-                    <svg
-                      viewBox="-160 -160 320 320"
-                      className="w-full max-w-md mx-auto bg-pixel-dark border-4 border-white"
-                    >
-                      <path
-                        d={`M ${waypoints[0].x} ${waypoints[0].z} ${waypoints.slice(1).map(wp => `L ${wp.x} ${wp.z}`).join(' ')} Z`}
-                        fill="none"
-                        stroke="#dc2626"
-                        strokeWidth="3"
-                      />
-                      <circle cx={waypoints[0].x} cy={waypoints[0].z} r="5" fill="#00e436" />
-                    </svg>
-                  </div>
+                {validation.errors.length > 0 && (
+                  <ul className="space-y-1 text-sm text-coral">{validation.errors.map((e, i) => <li key={i}>• {e.message}</li>)}</ul>
+                )}
+                {validation.warnings.length > 0 && (
+                  <ul className="space-y-1 text-sm text-sun">{validation.warnings.map((w, i) => <li key={i}>• {w.message}</li>)}</ul>
+                )}
+                {validation.isValid && (
+                  <dl className="grid grid-cols-2 gap-3 text-sm">
+                    <div><dt className="text-muted">Length</dt><dd className="font-display text-lg font-bold hud-num">{formatTrackLength(validation.stats.length)}</dd></div>
+                    <div><dt className="text-muted">Turns</dt><dd className="font-display text-lg font-bold hud-num">{validation.stats.turnCount}</dd></div>
+                    <div><dt className="text-muted">Difficulty</dt><dd className="font-display text-lg font-bold uppercase" style={{ color: getDifficultyColor(validation.stats.difficulty) }}>{validation.stats.difficulty}</dd></div>
+                    <div><dt className="text-muted">Avg width</dt><dd className="font-display text-lg font-bold hud-num">{Math.round(validation.stats.avgWidth)} m</dd></div>
+                  </dl>
                 )}
               </div>
             )}
-
-            {/* Action Buttons */}
-            <div className="flex gap-2 mt-4 flex-wrap">
-              {mode === 'draw' && (
-                <>
-                  <button
-                    onClick={handleClear}
-                    className="pixel-btn"
-                    disabled={isProcessing || rawPoints.length === 0}
-                  >
-                    Clear
-                  </button>
-                  <button
-                    onClick={handleProcessTrack}
-                    className="pixel-btn pixel-btn-secondary"
-                    disabled={isProcessing || rawPoints.length < 10}
-                  >
-                    {isProcessing ? 'Processing...' : 'Process Track'}
-                  </button>
-                </>
-              )}
-              {validation?.isValid && (
-                <>
-                  <button
-                    onClick={handlePlayTrack}
-                    className="pixel-btn pixel-btn-primary"
-                  >
-                    Play Track
-                  </button>
-                  <button
-                    onClick={() => setShowSaveDialog(true)}
-                    className="pixel-btn pixel-btn-secondary"
-                  >
-                    Save Track
-                  </button>
-                </>
-              )}
-            </div>
           </div>
-
-          {/* Stats Panel */}
-          <div className="lg:col-span-1">
-            <div className="pixel-panel">
-              <h3 className="text-lg font-pixel text-white mb-4">Track Info</h3>
-
-              {!validation && rawPoints.length === 0 && (
-                <p className="text-pixel-gray font-pixel-body">
-                  {mode === 'draw' ? 'Draw a track to see stats' : 'Generate a track to see stats'}
-                </p>
-              )}
-
-              {!validation && rawPoints.length > 0 && (
-                <p className="text-pixel-gray font-pixel-body">
-                  Click &quot;Process Track&quot; to validate
-                </p>
-              )}
-
-              {validation && (
-                <div className="space-y-4">
-                  {/* Validation Status */}
-                  <div className={`p-2 rounded ${validation.isValid ? 'bg-green-900/30' : 'bg-red-900/30'}`}>
-                    <span className={`font-pixel text-sm ${validation.isValid ? 'text-green-400' : 'text-red-400'}`}>
-                      {validation.isValid ? 'VALID' : 'INVALID'}
-                    </span>
-                  </div>
-
-                  {/* Errors */}
-                  {validation.errors.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-pixel text-red-400 mb-2">Errors</h4>
-                      <ul className="text-sm font-pixel-body text-red-300 space-y-1">
-                        {validation.errors.map((err, i) => (
-                          <li key={i}>• {err.message}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {/* Warnings */}
-                  {validation.warnings.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-pixel text-yellow-400 mb-2">Warnings</h4>
-                      <ul className="text-sm font-pixel-body text-yellow-300 space-y-1">
-                        {validation.warnings.map((warn, i) => (
-                          <li key={i}>• {warn.message}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {/* Stats */}
-                  {validation.isValid && (
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-pixel-gray font-pixel-body">Length</span>
-                        <span className="text-white font-pixel-body">
-                          {validation.stats.length >= 1000
-                            ? `${(validation.stats.length / 1000).toFixed(2)} km`
-                            : `${Math.round(validation.stats.length)} m`}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-pixel-gray font-pixel-body">Turns</span>
-                        <span className="text-white font-pixel-body">{validation.stats.turnCount}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-pixel-gray font-pixel-body">Difficulty</span>
-                        <span className={`font-pixel-body ${
-                          validation.stats.difficulty === 'easy' ? 'text-green-400' :
-                          validation.stats.difficulty === 'medium' ? 'text-yellow-400' :
-                          validation.stats.difficulty === 'hard' ? 'text-orange-400' :
-                          'text-red-400'
-                        }`}>
-                          {validation.stats.difficulty.toUpperCase()}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-pixel-gray font-pixel-body">Avg Width</span>
-                        <span className="text-white font-pixel-body">{Math.round(validation.stats.avgWidth)}m</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Tips */}
-            <div className="pixel-panel mt-4">
-              <h3 className="text-sm font-pixel text-white mb-2">Tips</h3>
-              <ul className="text-xs font-pixel-body text-pixel-gray space-y-1">
-                <li>• Draw a closed loop</li>
-                <li>• Avoid crossing over your path</li>
-                <li>• Include some variety in turns</li>
-                <li>• Minimum track length: 200m</li>
-              </ul>
-            </div>
+          <div className="glass p-5 text-sm text-muted">
+            <Label className="mb-2">Tips</Label>
+            <ul className="space-y-1">
+              <li>• Finish near where you started; small gaps close automatically.</li>
+              <li>• Don&apos;t cross your own line.</li>
+              <li>• Mix long straights with a hairpin or two.</li>
+              <li>• Keep it at least 200 m long.</li>
+            </ul>
           </div>
-        </div>
+        </aside>
       </div>
 
-      {/* Save Dialog */}
-      {showSaveDialog && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="pixel-panel max-w-md w-full">
-            <h2 className="text-xl font-pixel text-white mb-4">Save Track</h2>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-pixel-body text-pixel-gray mb-1">
-                  Track Name
-                </label>
-                <input
-                  type="text"
-                  value={trackName}
-                  onChange={(e) => setTrackName(e.target.value)}
-                  maxLength={50}
-                  className="w-full bg-pixel-black border-2 border-pixel-gray text-white px-3 py-2 font-pixel-body"
-                  placeholder="My Awesome Track"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-pixel-body text-pixel-gray mb-1">
-                  Author Name
-                </label>
-                <input
-                  type="text"
-                  value={authorName}
-                  onChange={(e) => setAuthorName(e.target.value)}
-                  maxLength={30}
-                  className="w-full bg-pixel-black border-2 border-pixel-gray text-white px-3 py-2 font-pixel-body"
-                  placeholder="Your Name"
-                />
-              </div>
-
-              {saveError && (
-                <p className="text-red-400 text-sm font-pixel-body">{saveError}</p>
-              )}
-
-              <div className="flex gap-2 justify-end">
-                <button
-                  onClick={() => setShowSaveDialog(false)}
-                  className="pixel-btn"
-                  disabled={isSaving}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveTrack}
-                  className="pixel-btn pixel-btn-primary"
-                  disabled={isSaving || !trackName.trim() || !authorName.trim()}
-                >
-                  {isSaving ? 'Saving...' : 'Save'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <SaveTrackDialog open={saveOpen} onClose={() => setSaveOpen(false)} onSave={save} saving={saving} error={saveError} />
+    </PageShell>
   );
 }

@@ -1,52 +1,44 @@
-const STORAGE_KEY = 'pixel-racer-scores';
+const STORAGE_KEY = 'pixel-racer-scores-v2';
 
 export interface ScoreEntry {
-  rank: number;
   playerName: string;
   gameMode: 'time-trial' | 'race';
   time: number;
   date: string;
   position?: number;
+  trackId?: string;
 }
 
-export function saveScore(entry: Omit<ScoreEntry, 'rank'>): void {
-  if (typeof window === 'undefined') return;
-
-  const stored = localStorage.getItem(STORAGE_KEY);
-  let scores: ScoreEntry[] = [];
-
-  if (stored) {
-    try {
-      scores = JSON.parse(stored);
-    } catch {
-      scores = [];
-    }
-  }
-
-  scores.push({ ...entry, rank: 0 });
-  scores.sort((a, b) => a.time - b.time);
-  scores = scores.slice(0, 100); // Keep top 100 scores
-  scores.forEach((s, i) => (s.rank = i + 1));
-
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(scores));
-}
-
-export function getScores(): ScoreEntry[] {
+function read(): ScoreEntry[] {
   if (typeof window === 'undefined') return [];
-
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (!stored) return [];
-
   try {
-    const parsed = JSON.parse(stored) as ScoreEntry[];
-    const sorted = parsed.sort((a, b) => a.time - b.time);
-    return sorted.map((entry, idx) => ({
-      ...entry,
-      rank: idx + 1,
-    }));
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((e): e is ScoreEntry =>
+      !!e && typeof e === 'object' && typeof (e as ScoreEntry).playerName === 'string' && Number.isFinite((e as ScoreEntry).time),
+    );
   } catch {
     return [];
   }
+}
+
+export function saveScore(entry: ScoreEntry): void {
+  if (typeof window === 'undefined') return;
+  const scores = read();
+  scores.push(entry);
+  scores.sort((a, b) => a.time - b.time);
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(scores.slice(0, 200)));
+  } catch {
+    // storage full or unavailable
+  }
+}
+
+/** Scores for one mode, best first, with 1-based rank within that mode. */
+export function getScores(mode?: 'time-trial' | 'race'): (ScoreEntry & { rank: number })[] {
+  const all = read().filter((s) => !mode || s.gameMode === mode).sort((a, b) => a.time - b.time);
+  return all.map((s, i) => ({ ...s, rank: i + 1 }));
 }
 
 export function clearScores(): void {

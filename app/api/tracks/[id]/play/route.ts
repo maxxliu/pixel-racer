@@ -1,56 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
+import { supabase } from '@/lib/supabase/client';
 
 interface RouteContext {
-  params: Promise<{ id: string }>;
+  params: { id: string };
 }
 
-// POST /api/tracks/[id]/play - Increment play count
-export async function POST(
-  request: NextRequest,
-  context: RouteContext
-) {
-  if (!isSupabaseConfigured() || !supabase) {
-    return NextResponse.json(
-      { error: 'Database not configured' },
-      { status: 503 }
-    );
-  }
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// POST /api/tracks/[id]/play - increment play count via the SECURITY DEFINER function
+export async function POST(_request: NextRequest, context: RouteContext) {
+  if (!supabase) return NextResponse.json({ error: 'Database not configured' }, { status: 503 });
+  const { id } = context.params;
+  if (!UUID.test(id)) return NextResponse.json({ error: 'Track not found' }, { status: 404 });
   try {
-    const { id } = await context.params;
-
-    const db = supabase as any;
-
-    // Use RPC function to increment play count
-    const { error } = await db.rpc('increment_play_count', {
-      track_uuid: id
-    });
-
-    if (error) {
-      // Fallback to manual increment if RPC doesn't exist
-      const { data: track, error: fetchError } = await db
-        .from('tracks')
-        .select('play_count')
-        .eq('id', id)
-        .single();
-
-      if (fetchError) throw fetchError;
-
-      const { error: updateError } = await db
-        .from('tracks')
-        .update({ play_count: ((track as { play_count?: number })?.play_count ?? 0) + 1 })
-        .eq('id', id);
-
-      if (updateError) throw updateError;
-    }
-
+    const { data: track } = await supabase.from('tracks').select('id').eq('id', id).eq('is_public', true).maybeSingle();
+    if (!track) return NextResponse.json({ error: 'Track not found' }, { status: 404 });
+    const { error } = await supabase.rpc('increment_play_count', { track_uuid: id });
+    if (error) throw error;
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error incrementing play count:', error);
-    return NextResponse.json(
-      { error: 'Failed to increment play count' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to increment play count' }, { status: 500 });
   }
 }

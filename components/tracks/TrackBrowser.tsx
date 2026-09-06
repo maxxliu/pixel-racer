@@ -1,174 +1,100 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import TrackCard from './TrackCard';
-import TrackFilters, { SortOption, SortOrder } from './TrackFilters';
-import type { Track, Difficulty } from '@/lib/supabase/types';
+import TrackFilters, { type SortOption, type SortOrder } from './TrackFilters';
+import type { TrackSummary, Difficulty } from '@/lib/supabase/types';
+import { Button, LinkButton } from '@/components/ui/Button';
 
-interface TrackBrowserProps {
-  initialTracks?: Track[];
+const PAGE = 12;
+
+export function playTrack(router: ReturnType<typeof useRouter>, track: { id: string; waypoints: unknown; start_position: unknown; name?: string }, mode: 'time-trial' | 'race' = 'time-trial') {
+  sessionStorage.setItem('customTrack', JSON.stringify({ id: track.id, name: track.name, waypoints: track.waypoints, startPosition: track.start_position }));
+  fetch(`/api/tracks/${track.id}/play`, { method: 'POST' }).catch(() => undefined);
+  router.push(`/play?mode=${mode}&custom=true`);
 }
 
-export default function TrackBrowser({ initialTracks = [] }: TrackBrowserProps) {
+export default function TrackBrowser() {
   const router = useRouter();
-  const [tracks, setTracks] = useState<Track[]>(initialTracks);
-  const [loading, setLoading] = useState(initialTracks.length === 0);
+  const [tracks, setTracks] = useState<TrackSummary[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Filters
   const [difficulty, setDifficulty] = useState<Difficulty | null>(null);
   const [sort, setSort] = useState<SortOption>('play_count');
   const [order, setOrder] = useState<SortOrder>('desc');
   const [search, setSearch] = useState('');
-
-  // Pagination
+  const [debounced, setDebounced] = useState('');
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
-  const limit = 12;
 
-  // Fetch tracks
-  const fetchTracks = useCallback(async () => {
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Filter changes reset to the first page in the same effect that fetches, so there is one request.
+  useEffect(() => { setOffset(0); }, [difficulty, sort, order, debounced]);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
     setLoading(true);
     setError(null);
+    const params = new URLSearchParams({ sort, order, limit: String(PAGE), offset: String(offset) });
+    if (difficulty) params.set('difficulty', difficulty);
+    if (debounced) params.set('search', debounced);
+    fetch(`/api/tracks?${params}`, { signal: ctrl.signal })
+      .then(async (res) => {
+        if (res.status === 503) throw new Error('The track library is not connected to a database yet.');
+        if (!res.ok) throw new Error('Failed to load tracks.');
+        const data = await res.json();
+        setTracks(data.tracks ?? []);
+        setTotal(data.total ?? 0);
+      })
+      .catch((e: Error) => { if (e.name !== 'AbortError') setError(e.message); })
+      .finally(() => { if (!ctrl.signal.aborted) setLoading(false); });
+    return () => ctrl.abort();
+  }, [difficulty, sort, order, debounced, offset]);
 
-    try {
-      const params = new URLSearchParams({
-        sort,
-        order,
-        limit: limit.toString(),
-        offset: offset.toString()
-      });
-
-      if (difficulty) {
-        params.set('difficulty', difficulty);
-      }
-
-      if (search) {
-        params.set('search', search);
-      }
-
-      const response = await fetch(`/api/tracks?${params}`);
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch tracks');
-      }
-
-      const data = await response.json();
-      setTracks(data.tracks || []);
-      setTotal(data.total || 0);
-    } catch (err) {
-      console.error('Error fetching tracks:', err);
-      setError('Failed to load tracks. The database may not be configured.');
-    } finally {
-      setLoading(false);
-    }
-  }, [difficulty, sort, order, search, offset]);
-
-  // Fetch on filter/sort change
-  useEffect(() => {
-    fetchTracks();
-  }, [fetchTracks]);
-
-  // Reset offset when filters change
-  useEffect(() => {
-    setOffset(0);
-  }, [difficulty, sort, order, search]);
-
-  // Play track
-  const handlePlayTrack = (track: Track) => {
-    // Store track data in sessionStorage
-    const trackData = {
-      id: track.id,
-      waypoints: track.waypoints,
-      startPosition: track.start_position
-    };
-
-    sessionStorage.setItem('customTrack', JSON.stringify(trackData));
-
-    // Increment play count
-    fetch(`/api/tracks/${track.id}/play`, { method: 'POST' }).catch(console.error);
-
-    router.push('/play?mode=time-trial&custom=true');
+  const play = async (t: TrackSummary) => {
+    const res = await fetch(`/api/tracks/${t.id}`);
+    if (!res.ok) { setError('Could not load that track.'); return; }
+    playTrack(router, await res.json());
   };
 
   return (
     <div>
-      {/* Filters */}
-      <TrackFilters
-        difficulty={difficulty}
-        sort={sort}
-        order={order}
-        search={search}
-        onDifficultyChange={setDifficulty}
-        onSortChange={setSort}
-        onOrderChange={setOrder}
-        onSearchChange={setSearch}
-      />
+      <TrackFilters difficulty={difficulty} sort={sort} order={order} search={search}
+        onDifficultyChange={setDifficulty} onSortChange={setSort} onOrderChange={setOrder} onSearchChange={setSearch} />
 
-      {/* Error State */}
       {error && (
-        <div className="pixel-panel bg-red-900/30 mb-6">
-          <p className="text-red-400 font-pixel-body">{error}</p>
+        <div className="glass mb-6 border-coral/40 p-5">
+          <p className="text-coral">{error}</p>
+          <p className="mt-1 text-sm text-muted">You can still draw and race your own tracks.</p>
+          <LinkButton href="/create-track" variant="primary" size="sm" className="mt-3">Create a track</LinkButton>
         </div>
       )}
 
-      {/* Loading State */}
-      {loading && (
-        <div className="text-center py-12">
-          <p className="text-pixel-gray font-pixel animate-blink">Loading tracks...</p>
-        </div>
-      )}
+      {loading && !error && <p className="py-12 text-center text-muted anim-pulse-soft">Loading tracks…</p>}
 
-      {/* Empty State */}
       {!loading && !error && tracks.length === 0 && (
-        <div className="text-center py-12">
-          <p className="text-pixel-gray font-pixel-body text-lg mb-4">No tracks found</p>
-          <p className="text-pixel-gray font-pixel-body text-sm mb-6">
-            {search ? 'Try a different search term' : 'Be the first to create one!'}
-          </p>
-          <button
-            onClick={() => router.push('/create-track')}
-            className="pixel-btn pixel-btn-primary"
-          >
-            Create Track
-          </button>
+        <div className="py-12 text-center">
+          <p className="text-lg">No tracks found</p>
+          <p className="mt-1 text-sm text-muted">{debounced ? 'Try a different search.' : 'Be the first to publish one.'}</p>
+          <LinkButton href="/create-track" variant="primary" className="mt-5">Create a track</LinkButton>
         </div>
       )}
 
-      {/* Track Grid */}
       {!loading && tracks.length > 0 && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {tracks.map((track) => (
-              <TrackCard
-                key={track.id}
-                track={track}
-                onPlay={() => handlePlayTrack(track)}
-              />
-            ))}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {tracks.map((t) => <TrackCard key={t.id} track={t} onPlay={() => void play(t)} />)}
           </div>
-
-          {/* Pagination */}
-          {total > limit && (
-            <div className="flex justify-center gap-2 mt-8">
-              <button
-                onClick={() => setOffset(Math.max(0, offset - limit))}
-                disabled={offset === 0}
-                className="pixel-btn text-sm disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <span className="px-4 py-2 font-pixel-body text-pixel-gray">
-                {Math.floor(offset / limit) + 1} / {Math.ceil(total / limit)}
-              </span>
-              <button
-                onClick={() => setOffset(offset + limit)}
-                disabled={offset + limit >= total}
-                className="pixel-btn text-sm disabled:opacity-50"
-              >
-                Next
-              </button>
+          {total > PAGE && (
+            <div className="mt-8 flex items-center justify-center gap-3">
+              <Button size="sm" onClick={() => setOffset(Math.max(0, offset - PAGE))} disabled={offset === 0}>Previous</Button>
+              <span className="text-sm text-muted hud-num">{Math.floor(offset / PAGE) + 1} / {Math.ceil(total / PAGE)}</span>
+              <Button size="sm" onClick={() => setOffset(offset + PAGE)} disabled={offset + PAGE >= total}>Next</Button>
             </div>
           )}
         </>

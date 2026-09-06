@@ -1,262 +1,160 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import LoadingScreen from './LoadingScreen';
 import HUD from './HUD';
 import PauseMenu from './PauseMenu';
 import RaceComplete from './RaceComplete';
 import MobileControls from './MobileControls';
-import { Game, RaceResults, GameMode, MinimapData, CustomTrackData } from '@/lib/game/Game';
+import { Game, type RaceResults, type GameMode, type MinimapData, type CustomTrackData } from '@/lib/game/Game';
+import type { GameStore } from '@/lib/game/GameStore';
+import { validateWaypoints } from '@/lib/game/TrackSpline';
 import { TouchInputHandler } from '@/lib/input/TouchInputHandler';
 import type { InputManager } from '@/lib/input/InputManager';
+import { useSettings } from '@/lib/settings';
+import { LinkButton } from '@/components/ui/Button';
 
 interface GameCanvasProps {
   gameMode?: GameMode;
   customTrack?: boolean;
+  /** Development-only lap override from `?laps=`. */
+  lapsOverride?: number;
 }
 
-export default function GameCanvas({ gameMode = 'time-trial', customTrack = false }: GameCanvasProps) {
+type Status = 'loading' | 'playing' | 'paused' | 'finished' | 'error';
+
+function readCustomTrack(): CustomTrackData | null {
+  try {
+    const raw = sessionStorage.getItem('customTrack');
+    if (!raw) return null;
+    const data = JSON.parse(raw) as CustomTrackData;
+    if (validateWaypoints(data.waypoints)) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export default function GameCanvas({ gameMode = 'time-trial', customTrack = false, lapsOverride }: GameCanvasProps) {
+  const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Game | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadingProgress, setLoadingProgress] = useState(0);
-  const [loadingMessage, setLoadingMessage] = useState('Initializing...');
-  const [isPaused, setIsPaused] = useState(false);
-  const [raceResults, setRaceResults] = useState<RaceResults | null>(null);
-  const [minimapData, setMinimapData] = useState<MinimapData | null>(null);
-  // Track ID - only set for custom tracks from the database
-  const [trackId, setTrackId] = useState<string | undefined>(undefined);
-  const [customTrackData, setCustomTrackData] = useState<CustomTrackData | undefined>(undefined);
-  const [isMobile, setIsMobile] = useState(false);
+  const [settings] = useSettings();
+  const [status, setStatus] = useState<Status>('loading');
+  const [progress, setProgress] = useState({ value: 0, message: 'Loading' });
+  const [results, setResults] = useState<RaceResults | null>(null);
+  const [store, setStore] = useState<GameStore | null>(null);
+  const [minimap, setMinimap] = useState<MinimapData | null>(null);
   const [inputManager, setInputManager] = useState<InputManager | null>(null);
-  const [gameState, setGameState] = useState({
-    speed: 0,
-    rpm: 0,
-    gear: 1,
-    lap: 1,
-    totalLaps: 3,
-    position: 1,
-    totalRacers: gameMode === 'race' ? 4 : 1,
-    lapTime: 0,
-    bestLapTime: 0,
-    carX: 0,
-    carZ: 0,
-    carRotation: 0,
-  });
+  const [trackId, setTrackId] = useState<string | undefined>(undefined);
+  const [isMobile, setIsMobile] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [session, setSession] = useState(0);
 
-  // Detect touch device on mount
-  useEffect(() => {
-    setIsMobile(TouchInputHandler.isTouchDevice());
-  }, []);
+  useEffect(() => { setIsMobile(TouchInputHandler.isTouchDevice()); }, []);
 
-  // Load custom track data from sessionStorage
+  // Own the Game lifecycle in one effect so StrictMode and "race again" can never orphan an instance.
   useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    let track: CustomTrackData | undefined;
     if (customTrack) {
-      const stored = sessionStorage.getItem('customTrack');
-      console.log('Loading custom track, stored data:', stored ? 'found' : 'not found');
-      if (stored) {
-        try {
-          const data = JSON.parse(stored);
-          console.log('Parsed track data, id:', data.id);
-          setCustomTrackData(data);
-          if (data.id) {
-            console.log('Setting trackId to:', data.id);
-            setTrackId(data.id);
-          } else {
-            console.log('No track id in data');
-          }
-        } catch (e) {
-          console.error('Failed to parse custom track data:', e);
-        }
+      const t = readCustomTrack();
+      if (!t) {
+        setErrorMessage('That track could not be loaded. Pick one from the library or draw a new one.');
+        setStatus('error');
+        return;
       }
+      track = t;
+      setTrackId(t.id);
     }
-  }, [customTrack]);
+    setStatus('loading');
+    setResults(null);
+    setProgress({ value: 0, message: 'Loading' });
 
-  const handleProgressUpdate = useCallback((progress: number, message: string) => {
-    setLoadingProgress(progress);
-    setLoadingMessage(message);
-    if (progress >= 100) {
-      // Get minimap data and track ID when loading completes
-      const data = gameRef.current?.getMinimapData();
-      if (data) {
-        setMinimapData(data);
-      }
-      // Only override track ID if we have a custom track with its own ID
-      const tid = gameRef.current?.getCustomTrackId();
-      if (tid && customTrack) {
-        setTrackId(tid);
-      }
-      // Grab the inputManager for mobile controls
-      const im = gameRef.current?.getInputManager();
-      if (im) {
-        setInputManager(im);
-      }
-      setTimeout(() => setIsLoading(false), 500);
+    const game = new Game(container, {
+      mode: gameMode,
+      customTrack: track,
+      lapsOverride,
+      onProgress: (value, message) => setProgress({ value, message }),
+      onPause: () => setStatus('paused'),
+      onFinish: (r) => { setResults(r); setStatus('finished'); },
+    });
+    gameRef.current = game;
+    setStore(game.store);
+    if (process.env.NODE_ENV !== 'production') {
+      (window as unknown as { __pixelRacer?: Game }).__pixelRacer = game;
     }
-  }, [customTrack]);
-
-  const handleGameStateUpdate = useCallback((state: typeof gameState) => {
-    setGameState(state);
-  }, []);
-
-  const handlePause = useCallback(() => {
-    setIsPaused(true);
-    gameRef.current?.pause();
-  }, []);
-
-  const handleResume = useCallback(() => {
-    setIsPaused(false);
-    gameRef.current?.resume();
-  }, []);
-
-  const handleRestart = useCallback(() => {
-    setIsPaused(false);
-    setRaceResults(null);
-    gameRef.current?.restart();
-  }, []);
-
-  const handleExit = useCallback(() => {
-    gameRef.current?.dispose();
-    window.location.href = '/';
-  }, []);
-
-  const handleRaceComplete = useCallback((results: RaceResults) => {
-    setRaceResults(results);
-  }, []);
-
-  const handlePlayAgain = useCallback(() => {
-    setRaceResults(null);
-    setMinimapData(null);
-    setIsLoading(true);
-    setLoadingProgress(0);
-    // Dispose old game and create new one
-    gameRef.current?.dispose();
-
-    if (containerRef.current) {
-      const game = new Game(containerRef.current, {
-        gameMode,
-        customTrack: customTrackData,
-        onProgressUpdate: handleProgressUpdate,
-        onGameStateUpdate: handleGameStateUpdate,
-        onPause: handlePause,
-        onRaceComplete: handleRaceComplete,
-      });
-      gameRef.current = game;
-      game.init();
-    }
-  }, [gameMode, customTrackData, handleProgressUpdate, handleGameStateUpdate, handlePause, handleRaceComplete]);
-
-  // Refs for pause keyboard handler to avoid stale closures
-  const isPausedRef = useRef(isPaused);
-  isPausedRef.current = isPaused;
-  const raceResultsRef = useRef(raceResults);
-  raceResultsRef.current = raceResults;
-
-  // Separate effect for keyboard pause handler to avoid re-initializing the game
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !raceResultsRef.current) {
-        if (isPausedRef.current) {
-          handleResume();
-        } else {
-          handlePause();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handlePause, handleResume]);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-    // Wait for custom track data to load if we're in custom mode
-    if (customTrack && !customTrackData) return;
-
-    // Initialize the game
-    const game = new Game(containerRef.current, {
-      gameMode,
-      customTrack: customTrackData,
-      onProgressUpdate: handleProgressUpdate,
-      onGameStateUpdate: handleGameStateUpdate,
-      onPause: handlePause,
-      onRaceComplete: handleRaceComplete,
+    let cancelled = false;
+    game.init().then(() => {
+      if (cancelled) return;
+      setMinimap(game.getMinimapData());
+      setInputManager(game.getInputManager());
+      setStatus('playing');
+    }).catch((err: unknown) => {
+      if (cancelled) return;
+      console.error(err);
+      setErrorMessage(err instanceof Error ? err.message : 'The game failed to start.');
+      setStatus('error');
     });
 
-    gameRef.current = game;
-    game.init();
+    // Audio needs a user gesture; unlock on the first one.
+    const unlock = () => { game.audio.unlock(); };
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
 
     return () => {
+      cancelled = true;
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
       game.dispose();
+      if (gameRef.current === game) gameRef.current = null;
+      setInputManager(null);
+      setStore(null);
     };
-  }, [gameMode, customTrack, customTrackData, handleProgressUpdate, handleGameStateUpdate, handlePause, handleRaceComplete]);
+  }, [gameMode, customTrack, lapsOverride, session]);
 
-  // Click handler to ensure focus - but only when actively playing
-  const handleClick = useCallback((e: React.MouseEvent) => {
-    // Don't steal focus from interactive elements
-    const target = e.target as HTMLElement;
-    if (
-      target.tagName === 'INPUT' ||
-      target.tagName === 'TEXTAREA' ||
-      target.tagName === 'BUTTON' ||
-      target.closest('input') ||
-      target.closest('button')
-    ) {
-      return;
-    }
+  const resume = useCallback(() => { gameRef.current?.audio.unlock(); gameRef.current?.resume(); setStatus('playing'); }, []);
+  const restart = useCallback(() => { gameRef.current?.restart(); setResults(null); setStatus('playing'); }, []);
+  const playAgain = useCallback(() => { setSession((s) => s + 1); }, []);
+  const exit = useCallback(() => { router.push('/'); }, [router]);
 
-    // Only focus container when actively playing (not paused, not showing results)
-    if (!isPaused && !raceResults && !isLoading) {
-      containerRef.current?.focus();
-    }
-  }, [isPaused, raceResults, isLoading]);
+  const focusGame = useCallback((e: React.MouseEvent) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('button, input, a, select, textarea')) return;
+    if (status === 'playing') containerRef.current?.focus();
+  }, [status]);
 
   return (
-    <div
-      className="game-container"
-      ref={containerRef}
-      tabIndex={0}
-      onClick={handleClick}
-      style={{ outline: 'none' }}
-    >
-      {isLoading && (
-        <LoadingScreen progress={loadingProgress} message={loadingMessage} />
+    <div className="game-container" ref={containerRef} tabIndex={-1} onClick={focusGame}>
+      {status === 'loading' && <LoadingScreen progress={progress.value} message={progress.message} />}
+
+      {status === 'error' && (
+        <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 bg-ink px-6 text-center">
+          <h1 className="text-display-m italic">Can&apos;t start the race</h1>
+          <p className="max-w-md text-muted">{errorMessage}</p>
+          <div className="flex gap-3">
+            <LinkButton href="/tracks">Track library</LinkButton>
+            <LinkButton href="/" variant="primary">Main menu</LinkButton>
+          </div>
+        </div>
       )}
 
-      {!isLoading && !isPaused && !raceResults && (
-        <>
-          <HUD {...gameState} minimapData={minimapData || undefined} isMobile={isMobile} />
-          {isMobile && (
-            <MobileControls
-              inputManager={inputManager}
-              containerRef={containerRef}
-              isPaused={isPaused}
-              isLoading={isLoading}
-            />
-          )}
-        </>
+      {store && status !== 'loading' && status !== 'error' && (
+        <HUD store={store} minimap={minimap} isMobile={isMobile} mode={gameMode} speedLines={settings.speedLines && !isMobile} />
       )}
 
-      {isPaused && !raceResults && (
-        <PauseMenu
-          onResume={handleResume}
-          onRestart={handleRestart}
-          onExit={handleExit}
-        />
+      {status === 'playing' && isMobile && inputManager && (
+        <MobileControls inputManager={inputManager} containerRef={containerRef} />
       )}
 
-      {raceResults && (
-        <RaceComplete
-          totalTime={raceResults.totalTime}
-          bestLapTime={raceResults.bestLapTime}
-          lapTimes={raceResults.lapTimes}
-          totalLaps={raceResults.totalLaps}
-          position={raceResults.position}
-          gameMode={gameMode}
-          trackId={trackId}
-          onPlayAgain={handlePlayAgain}
-          onMainMenu={handleExit}
-        />
+      {status === 'paused' && (
+        <PauseMenu onResume={resume} onRestart={restart} onExit={exit} isMobile={isMobile} />
+      )}
+
+      {status === 'finished' && results && (
+        <RaceComplete results={results} trackId={trackId} onPlayAgain={playAgain} onMainMenu={exit} />
       )}
     </div>
   );

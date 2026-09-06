@@ -1,290 +1,208 @@
 'use client';
 
-import { memo } from 'react';
-
-export interface MinimapData {
-  centerPath: string;
-  innerPath: string;
-  outerPath: string;
-  bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
-}
+import { memo, useEffect, useRef, useSyncExternalStore } from 'react';
+import type { GameStore, HudState, Notice } from '@/lib/game/GameStore';
+import type { MinimapData } from '@/lib/game/TrackSpline';
+import { formatTime, formatDelta } from '@/lib/utils/format';
+import { hex } from '@/lib/game/palette';
+import { SpeedLines } from './SpeedLines';
 
 interface HUDProps {
-  speed: number;
-  rpm: number;
-  gear: number;
-  lap: number;
-  totalLaps: number;
-  position: number;
-  totalRacers: number;
-  lapTime: number;
-  bestLapTime: number;
-  carX?: number;
-  carZ?: number;
-  carRotation?: number;
-  minimapData?: MinimapData;
-  isMobile?: boolean;
+  store: GameStore;
+  minimap: MinimapData | null;
+  isMobile: boolean;
+  mode: 'time-trial' | 'race';
+  speedLines: boolean;
 }
 
-function HUD({
-  speed,
-  rpm,
-  gear,
-  lap,
-  totalLaps,
-  position,
-  totalRacers,
-  lapTime,
-  bestLapTime,
-  carX = 0,
-  carZ = 0,
-  carRotation = 0,
-  minimapData,
-  isMobile = false,
-}: HUDProps) {
-  const formatTime = (ms: number): string => {
-    if (ms === 0) return '--:--.---';
-    const minutes = Math.floor(ms / 60000);
-    const seconds = Math.floor((ms % 60000) / 1000);
-    const millis = Math.floor(ms % 1000);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}.${millis.toString().padStart(3, '0')}`;
-  };
+const MAX_KMH = 230;
 
-  // Calculate minimap transform based on track bounds
-  const getMinimapTransform = () => {
-    if (!minimapData) {
-      return { scale: 1, offsetX: 0, offsetZ: 0, viewBox: '-120 -120 240 240' };
-    }
+function HUDInner({ store, minimap, isMobile, mode, speedLines }: HUDProps) {
+  const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  const speedRef = useRef<HTMLDivElement>(null);
+  const gearRef = useRef<HTMLDivElement>(null);
+  const rpmRef = useRef<HTMLDivElement>(null);
+  const arcRef = useRef<SVGCircleElement>(null);
+  const timeRef = useRef<HTMLDivElement>(null);
+  const bestRef = useRef<HTMLDivElement>(null);
+  const meterRef = useRef<HTMLDivElement>(null);
+  const meterWrapRef = useRef<HTMLDivElement>(null);
+  const linesRef = useRef<HTMLDivElement>(null);
+  const dotsRef = useRef<SVGGElement>(null);
 
-    const { bounds } = minimapData;
-    const trackWidth = bounds.maxX - bounds.minX;
-    const trackHeight = bounds.maxZ - bounds.minZ;
-    const maxDim = Math.max(trackWidth, trackHeight);
-
-    // Center of the track
-    const centerX = (bounds.minX + bounds.maxX) / 2;
-    const centerZ = (bounds.minZ + bounds.maxZ) / 2;
-
-    // Scale to fit in viewBox with padding
-    const padding = 20;
-    const viewSize = maxDim + padding * 2;
-
-    return {
-      scale: 200 / viewSize,
-      offsetX: centerX,
-      offsetZ: centerZ,
-      viewBox: `${-viewSize / 2} ${-viewSize / 2} ${viewSize} ${viewSize}`,
+  // Hot values straight into the DOM at render rate.
+  useEffect(() => {
+    let raf = 0;
+    const ARC = 2 * Math.PI * 44;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const s: HudState = store.state;
+      if (speedRef.current) speedRef.current.textContent = Math.round(s.speedKmh).toString().padStart(3, '0');
+      if (gearRef.current) gearRef.current.textContent = s.gear === -1 ? 'R' : String(s.gear);
+      if (rpmRef.current) rpmRef.current.style.width = `${Math.round(s.rpm * 100)}%`;
+      if (arcRef.current) {
+        const f = Math.min(1, s.speedKmh / MAX_KMH) * 0.75;
+        arcRef.current.style.strokeDashoffset = String(ARC * (1 - f));
+      }
+      if (timeRef.current) timeRef.current.textContent = formatTime(s.lapTime);
+      if (bestRef.current) bestRef.current.textContent = s.bestLap > 0 ? formatTime(s.bestLap) : '--:--.---';
+      if (meterRef.current && meterWrapRef.current) {
+        const charge = s.isDrifting ? Math.min(1, s.driftCharge / 2.9) : s.boostTime > 0 ? Math.min(1, s.boostTime / 1.7) : 0;
+        meterRef.current.style.width = `${Math.round(charge * 100)}%`;
+        const tier = s.isDrifting ? s.driftTier : s.boostTier;
+        meterRef.current.style.background = tier === 3 ? '#b38cff' : tier === 2 ? '#ff8a5b' : tier === 1 ? '#3fb6ff' : '#fff7ef';
+        meterWrapRef.current.style.opacity = charge > 0 ? '1' : '0.35';
+      }
+      if (linesRef.current) {
+        const n = Math.max(0, (s.speedKmh - 120) / (MAX_KMH - 120));
+        const o = speedLines ? Math.min(0.8, n * n * 0.7 + (s.boostTime > 0 ? 0.35 : 0)) : 0;
+        linesRef.current.style.opacity = o.toFixed(2);
+      }
+      if (dotsRef.current) {
+        const g = dotsRef.current;
+        const children = g.children;
+        for (let i = 0; i < s.dots.length && i < children.length; i++) {
+          const d = s.dots[i];
+          (children[i] as SVGGElement).setAttribute('transform', `translate(${d.x.toFixed(1)} ${d.z.toFixed(1)}) rotate(${(180 - (d.heading * 180) / Math.PI).toFixed(1)})`);
+        }
+      }
     };
-  };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [store, speedLines]);
 
-  const minimapTransform = getMinimapTransform();
-
-  // Transform car position to minimap coordinates
-  const getCarMinimapPosition = () => {
-    if (!minimapData) {
-      return { x: 0, y: 0 };
-    }
-
-    // Transform world coordinates to SVG coordinates (centered around track center)
-    const x = carX - minimapTransform.offsetX;
-    const z = carZ - minimapTransform.offsetZ;
-
-    return { x, y: z };
-  };
-
-  const carPos = getCarMinimapPosition();
-
-  // Transform path to be centered around origin
-  const transformPath = (path: string) => {
-    if (!path || !minimapData) return path;
-
-    // Parse and transform the path
-    const parts = path.split(/(?=[MLZ])/);
-    const transformed = parts.map(part => {
-      const cmd = part.charAt(0);
-      const coords = part.slice(1).trim();
-
-      if (cmd === 'Z' || !coords) return part;
-
-      const [x, z] = coords.split(' ').map(Number);
-      const newX = x - minimapTransform.offsetX;
-      const newZ = z - minimapTransform.offsetZ;
-
-      return `${cmd} ${newX} ${newZ}`;
-    });
-
-    return transformed.join(' ');
-  };
+  const showPos = mode === 'race';
+  const delta = snap.lastLapDelta;
 
   return (
-    <div className="hud-overlay font-pixel">
-      {/* Scanlines over HUD */}
-      <div className="absolute inset-0 scanlines pointer-events-none" />
+    <div className="hud" aria-hidden={snap.phase === 'finished'}>
+      {speedLines && <SpeedLines innerRef={linesRef} />}
+      <div className="vignette" />
 
-      {/* Top Bar - Position and Lap */}
-      <div className="absolute top-4 left-4 right-4 flex justify-between items-start">
-        {/* Position */}
-        <div className="pixel-panel">
-          <div className="text-[8px] text-pixel-gray uppercase tracking-wider mb-1">POS</div>
-          <div className="text-2xl text-pixel-white">
-            {position}<span className="text-sm text-pixel-gray">/{totalRacers}</span>
+      {/* top-left: lap & position */}
+      <div className={`absolute left-3 top-3 flex gap-2 ${isMobile ? 'scale-75 origin-top-left' : ''}`}>
+        <div className="glass px-4 py-2">
+          <div className="text-label uppercase text-muted">Lap</div>
+          <div className="text-3xl font-bold italic leading-none hud-num">
+            {snap.lap}<span className="text-base text-muted">/{snap.totalLaps}</span>
           </div>
         </div>
-
-        {/* Lap Counter */}
-        <div className="pixel-panel text-center">
-          <div className="text-[8px] text-pixel-gray uppercase tracking-wider mb-1">LAP</div>
-          <div className="text-2xl text-pixel-yellow">
-            {lap}<span className="text-sm text-pixel-gray">/{totalLaps}</span>
-          </div>
-        </div>
-
-        {/* Times */}
-        <div className="pixel-panel text-right">
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center justify-end gap-2">
-              <span className="text-[8px] text-pixel-gray">TIME</span>
-              <span className="text-sm text-pixel-white">{formatTime(lapTime)}</span>
-            </div>
-            <div className="flex items-center justify-end gap-2">
-              <span className="text-[8px] text-pixel-gray">BEST</span>
-              <span className="text-sm text-pixel-cyan">{formatTime(bestLapTime)}</span>
+        {showPos && (
+          <div className="glass px-4 py-2">
+            <div className="text-label uppercase text-muted">Pos</div>
+            <div className={`text-3xl font-bold italic leading-none hud-num ${snap.position === 1 ? 'text-lime' : ''}`}>
+              {snap.position}<span className="text-base text-muted">/{snap.totalRacers}</span>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Bottom - Speedometer and Gear */}
-      <div className={`absolute bottom-4 flex items-end gap-3 ${
-        isMobile
-          ? 'left-1/2 -translate-x-1/2 bottom-2'
-          : 'right-4'
-      }`}>
-        {/* Gear Display */}
-        <div className="pixel-panel text-center min-w-[60px]">
-          <div className="text-[8px] text-pixel-gray uppercase mb-1">GEAR</div>
-          <div className="text-3xl text-pixel-orange">
-            {gear === 0 ? 'N' : gear === -1 ? 'R' : gear}
-          </div>
-        </div>
-
-        {/* Digital Speedometer */}
-        <div className="pixel-panel">
-          <div className="text-[8px] text-pixel-gray uppercase mb-1">KM/H</div>
-          <div className="digital-display text-3xl tabular-nums min-w-[100px] text-center">
-            {Math.round(speed).toString().padStart(3, '0')}
-          </div>
-        </div>
-      </div>
-
-      {/* Pixelated Minimap */}
-      <div className="absolute bottom-4 left-4 pixel-minimap w-44 h-44 p-2">
-        <svg
-          viewBox={minimapData ? minimapTransform.viewBox : '-120 -120 240 240'}
-          className="w-full h-full"
-          style={{ imageRendering: 'pixelated' }}
-        >
-          {minimapData ? (
-            <>
-              {/* Track surface - filled area between inner and outer paths */}
-              <path
-                d={transformPath(minimapData.outerPath)}
-                fill="#4a4a6a"
-                stroke="none"
-              />
-              <path
-                d={transformPath(minimapData.innerPath)}
-                fill="#0f0f23"
-                stroke="none"
-              />
-
-              {/* Track edges */}
-              <path
-                d={transformPath(minimapData.innerPath)}
-                fill="none"
-                stroke="#2d2d44"
-                strokeWidth="2"
-              />
-              <path
-                d={transformPath(minimapData.outerPath)}
-                fill="none"
-                stroke="#2d2d44"
-                strokeWidth="2"
-              />
-
-              {/* Center line - dashed */}
-              <path
-                d={transformPath(minimapData.centerPath)}
-                fill="none"
-                stroke="#fff1e8"
-                strokeWidth="1"
-                strokeDasharray="8 8"
-              />
-
-              {/* Start/finish marker */}
-              <rect
-                x={-minimapTransform.offsetX - 10}
-                y={-minimapTransform.offsetZ - 2}
-                width="20"
-                height="4"
-                fill="#fff1e8"
-              />
-            </>
-          ) : (
-            <>
-              {/* Fallback: circular track */}
-              <circle
-                cx="0"
-                cy="0"
-                r="100"
-                fill="none"
-                stroke="#4a4a6a"
-                strokeWidth="20"
-              />
-              <circle
-                cx="0"
-                cy="0"
-                r="90"
-                fill="none"
-                stroke="#2d2d44"
-                strokeWidth="2"
-              />
-              <circle
-                cx="0"
-                cy="0"
-                r="110"
-                fill="none"
-                stroke="#2d2d44"
-                strokeWidth="2"
-              />
-              <circle
-                cx="0"
-                cy="0"
-                r="100"
-                fill="none"
-                stroke="#fff1e8"
-                strokeWidth="2"
-                strokeDasharray="8 8"
-              />
-              <rect x="-110" y="-4" width="25" height="8" fill="#fff1e8" />
-            </>
+      {/* top-right: timing */}
+      <div className={`absolute right-3 top-3 glass px-4 py-2 text-right ${isMobile ? 'scale-75 origin-top-right' : ''}`}>
+        <div className="text-label uppercase text-muted">Lap time</div>
+        <div ref={timeRef} className="text-2xl font-bold italic leading-none hud-num">0:00.000</div>
+        <div className="mt-1 flex items-baseline justify-end gap-2 text-xs">
+          <span className="text-muted">BEST</span>
+          <span ref={bestRef} className="hud-num text-sun">--:--.---</span>
+          {snap.lastLap > 0 && delta !== 0 && (
+            <span className={`hud-num ${delta < 0 ? 'text-lime' : 'text-coral'}`}>{formatDelta(delta)}</span>
           )}
-
-          {/* Car indicator - chunky arrow */}
-          <g transform={`translate(${carPos.x}, ${carPos.y}) rotate(${carRotation * 180 / Math.PI + 180})`}>
-            <rect x="-4" y="-8" width="8" height="16" fill="#ff004d" />
-            <rect x="-6" y="4" width="4" height="4" fill="#ff004d" />
-            <rect x="2" y="4" width="4" height="4" fill="#ff004d" />
-          </g>
-        </svg>
+        </div>
       </div>
 
-      {/* Center notifications area */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 pointer-events-none">
-        {/* Checkpoint, lap complete, etc. notifications will appear here */}
+      {/* bottom-right: speed */}
+      <div className={`absolute bottom-3 right-3 flex items-end gap-3 ${isMobile ? 'bottom-2 left-1/2 right-auto -translate-x-1/2 scale-[0.7] origin-bottom' : ''}`}>
+        <div className="glass relative flex h-36 w-36 items-center justify-center rounded-full">
+          <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full -rotate-[135deg]">
+            <circle cx="50" cy="50" r="44" fill="none" stroke="rgba(255,247,239,0.12)" strokeWidth="6" strokeDasharray={`${2 * Math.PI * 44 * 0.75} ${2 * Math.PI * 44}`} strokeLinecap="round" />
+            <circle ref={arcRef} cx="50" cy="50" r="44" fill="none" stroke="#ff5c4d" strokeWidth="6" strokeDasharray={`${2 * Math.PI * 44}`} strokeDashoffset={2 * Math.PI * 44} strokeLinecap="round" style={{ transition: 'stroke-dashoffset 80ms linear' }} />
+          </svg>
+          <div className="text-center">
+            <div ref={speedRef} className="text-4xl font-bold italic leading-none hud-num">000</div>
+            <div className="text-label uppercase text-muted">km/h</div>
+          </div>
+          <div ref={gearRef} className="absolute bottom-3 right-1/2 translate-x-1/2 rounded-md bg-ink/70 px-2 py-0.5 text-sm font-bold text-sun hud-num">1</div>
+        </div>
+        <div className={`flex flex-col gap-2 pb-2 ${isMobile ? 'hidden' : ''}`}>
+          <div className="h-2 w-28 overflow-hidden rounded-full bg-cream/10">
+            <div ref={rpmRef} className="h-full rounded-full bg-gradient-to-r from-lime via-sun to-coral" style={{ width: '20%' }} />
+          </div>
+          <div ref={meterWrapRef} className="transition-opacity">
+            <div className="mb-1 text-label uppercase text-muted">Drift boost</div>
+            <div className="h-2 w-28 overflow-hidden rounded-full bg-cream/10">
+              <div ref={meterRef} className="h-full rounded-full" style={{ width: '0%', background: '#fff7ef' }} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* bottom-left: minimap */}
+      {minimap && (
+        <div className={`absolute bottom-3 left-3 glass p-2 ${isMobile ? 'h-24 w-24 scale-90 origin-bottom-left' : 'h-40 w-40'}`}>
+          <Minimap data={minimap} dots={snap.dots} dotsRef={dotsRef} />
+        </div>
+      )}
+
+      {/* centre notices */}
+      <div className="pointer-events-none absolute left-1/2 top-[22%] flex -translate-x-1/2 flex-col items-center gap-2">
+        {snap.phase === 'countdown' && snap.countdown !== null && (
+          <div key={`cd-${snap.countdown}`} className="anim-pop text-[8rem] font-bold italic leading-none text-cream drop-shadow-[0_6px_0_rgba(15,10,30,0.6)]">
+            {snap.countdown}
+          </div>
+        )}
+        {snap.go && (
+          <div className="anim-go text-[8rem] font-bold italic leading-none text-lime drop-shadow-[0_6px_0_rgba(15,10,30,0.6)]">GO!</div>
+        )}
+        {snap.wrongWay && (
+          <div className="anim-pulse-soft rounded-lg bg-coral px-6 py-2 text-2xl font-bold italic uppercase text-ink">Wrong way</div>
+        )}
+        {snap.notices.map((n) => <NoticeView key={n.id} notice={n} />)}
+        {snap.stuck && snap.phase === 'racing' && !isMobile && (
+          <div className="rounded-md bg-ink/70 px-3 py-1 text-sm text-cream">Stuck? Press <b>R</b> to respawn</div>
+        )}
       </div>
     </div>
   );
 }
 
-export default memo(HUD);
+function NoticeView({ notice }: { notice: Notice }) {
+  const color = notice.kind === 'good' ? 'text-lime' : notice.kind === 'bad' ? 'text-coral' : notice.kind === 'big' ? 'text-sun' : 'text-cream';
+  return (
+    <div className="anim-pop text-center">
+      <div className={`text-4xl font-bold italic uppercase leading-none drop-shadow-[0_4px_0_rgba(15,10,30,0.6)] ${color}`}>{notice.text}</div>
+      {notice.sub && <div className="mt-1 text-sm font-semibold uppercase tracking-wider text-cream/85">{notice.sub}</div>}
+    </div>
+  );
+}
+
+function Minimap({ data, dots, dotsRef }: { data: MinimapData; dots: HudState['dots']; dotsRef: React.RefObject<SVGGElement> }) {
+  const { bounds } = data;
+  const w = bounds.maxX - bounds.minX, h = bounds.maxZ - bounds.minZ;
+  const size = Math.max(w, h) + 16;
+  const cx = (bounds.minX + bounds.maxX) / 2, cz = (bounds.minZ + bounds.maxZ) / 2;
+  const viewBox = `${cx - size / 2} ${cz - size / 2} ${size} ${size}`;
+  const s = data.start;
+    const dotR = size / 42;
+  return (
+    <svg viewBox={viewBox} className="h-full w-full" aria-hidden="true">
+      <path d={data.outerPath} fill="#6f6788" stroke="#fff7ef" strokeWidth={size / 120} strokeOpacity="0.9" />
+      <path d={data.innerPath} fill="#221838" stroke="#fff7ef" strokeWidth={size / 120} strokeOpacity="0.9" />
+      <g transform={`translate(${s.x} ${s.z}) rotate(${180 - (Math.atan2(s.tx, s.tz) * 180) / Math.PI})`}>
+        <rect x={-size / 24} y={-size / 260} width={size / 12} height={size / 130} fill="#fff7ef" />
+      </g>
+      <g ref={dotsRef}>
+        {dots.map((d, i) => (
+          <g key={i}>
+            {d.isPlayer ? (
+              <path d={`M 0 ${-dotR * 1.6} L ${dotR} ${dotR} L 0 ${dotR * 0.4} L ${-dotR} ${dotR} Z`} fill={hex(d.color)} stroke="#0f0a1e" strokeWidth={size / 300} />
+            ) : (
+              <circle r={dotR * 0.8} fill={hex(d.color)} stroke="#0f0a1e" strokeWidth={size / 300} />
+            )}
+          </g>
+        ))}
+      </g>
+    </svg>
+  );
+}
+
+export default memo(HUDInner);
