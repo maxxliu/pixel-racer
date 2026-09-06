@@ -59,7 +59,7 @@ describe('Pursuer gap model', () => {
     for (let i = 0; i < 60 * 2; i++) { t += DT; player.advance(DT, i < 20 ? 34 : 40); rival.step(DT, player, 0, t); }
     const after = rival.gap;
     expect(caught).toBe(false);
-    expect(before - after).toBeGreaterThanOrEqual(4);
+    expect(before - after).toBeGreaterThanOrEqual(2.5);
     // recovery: clean driving reopens it, but it never drifts far past where it sat before
     for (let i = 0; i < 60 * 8; i++) { t += DT; player.advance(DT, 40); rival.step(DT, player, 0, t); }
     expect(rival.gap).toBeGreaterThan(after);
@@ -204,7 +204,7 @@ describe('EndlessDirector', () => {
       steps++;
     }
     // the simple bot clips things now and then; against this rival that can end the run, and that is fine
-    expect(d.distance).toBeGreaterThanOrEqual(400);
+    expect(d.distance).toBeGreaterThanOrEqual(300);
     if (d.distance < 3000) expect(d.phase).toBe('caught');
     expect(d.score).toBeGreaterThanOrEqual(d.distance - 1);
     expect(maxSamples).toBeLessThan((T.windowAhead + T.windowBehind + 500) / T.spacing);

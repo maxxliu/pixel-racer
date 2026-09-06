@@ -21,12 +21,12 @@ export const ENDLESS_TUNING = {
   rampMin: 8,
   rampMax: 14,
   /** Distance thresholds for difficulty bands 1..4 (band 0 below the first). */
-  bandDistances: [300, 900, 1800, 3200],
+  bandDistances: [280, 800, 1600, 2800],
 
   // --- obstacles ---
   clearLane: 4.4,
   /** Minimum gap between obstacle patterns per band. */
-  patternSpacing: [95, 80, 66, 52, 46],
+  patternSpacing: [90, 75, 62, 50, 45],
   /** Speed used for the reaction-distance floor per band: gap ≥ reactionTime·v + reactionBase. */
   expectedSpeed: [30, 36, 42, 46, 50],
   reactionTime: 0.7,
@@ -44,18 +44,18 @@ export const ENDLESS_TUNING = {
   nearMissSpeed: 20,
 
   // --- rival ---
-  // Mistake budget: the rival lives on your bumper. With the early comfort gap of 11 m a cone
-  // clip costs ~6 m (surge plus the speed you lose) and takes ~15 s to win back; a second clip
-  // before then is a pass. A block or hard wall hit is a pass from anywhere. Late in the run
-  // the comfort gap is 4.5 m and any touch is fatal.
+  // Mistake budget: the rival lives on your bumper. With the early comfort gap of 10 m a cone
+  // clip costs ~5 m (surge plus the speed you lose) and takes ~20 s to win back, leaving it on
+  // your door; a second clip before then is a pass. A block or hard wall hit is a pass from
+  // anywhere. Late in the run the comfort gap is 4 m and any touch is fatal.
   rivalStartGap: 16,
-  pressureDistance: 3500,
+  pressureDistance: 3000,
   pressureMax: 1.3,
-  desiredGapStart: 11,
-  desiredGapEnd: 4.5,
+  desiredGapStart: 10,
+  desiredGapEnd: 4,
   desiredGapFloor: 2.5,
   /** The rival is never further back than this, whatever the player does. */
-  maxGap: 60,
+  maxGap: 50,
   /** Player speed low-pass (s) the rival paces itself against: short, so braking for a corner costs little but a crash does. */
   refTau: 0.6,
   rivalTau: 0.45,
@@ -67,15 +67,15 @@ export const ENDLESS_TUNING = {
   rivalBrake: 22,
   /** Extra corner grip while surging or committed to a pass, so a mistake in a corner still costs you. */
   surgeGrip: 2.2,
-  closeRateStart: 1.6,
-  closeRateEnd: 2.6,
-  recedeRateStart: 0.06,
-  recedeRateEnd: 0.025,
+  closeRateStart: 1.8,
+  closeRateEnd: 2.8,
+  recedeRateStart: 0.05,
+  recedeRateEnd: 0.02,
   recedeFloor: 0.7,
   /** Beyond comfort + leashExtra the closing rate doubles; beyond comfort + 50 it triples. */
   leashExtra: 10,
   // (the rival's speed filter realises roughly two thirds of a surge)
-  surgeLight: { speed: 6, time: 1.3 },
+  surgeLight: { speed: 6, time: 1.2 },
   surgeHeavy: { speed: 13, time: 1.8 },
   heavyImpact: 6,
   /** Caught when the rival's centre is this far ahead of the player's (negative = it has passed you). */
