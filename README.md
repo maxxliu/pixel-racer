@@ -14,6 +14,7 @@ A sunset arcade racer for the browser. Drift, boost, and chase the best lap on t
 | Respawn at last checkpoint | `R` | B | ↻ |
 | Pause | `Esc` | Start | ⏸ |
 | Mute | `M` | — | — |
+| Run again (Endless Chase, after being caught) | `Space` / `Enter` / `R` | — | Tap "Run again" |
 
 Longer drifts charge bigger boosts (blue → orange → purple sparks). Press the throttle right as the lights go green for a perfect start. Every checkpoint must be passed in order for a lap to count. Laps, opponents, difficulty, quality, camera and audio live in Settings.
 
@@ -32,7 +33,7 @@ npm test
 npm run build
 ```
 
-In development, `?laps=N` on `/play` overrides the lap count, and `window.__pixelRacer` exposes the running game (`setAutopilot(true)` lets the AI drive the player car).
+In development, `?laps=N` on `/play` overrides the lap count, and `window.__pixelRacer` exposes the running game. `setAutopilot(true)` lets a bot drive the player car in every mode: the race AI on circuits, and `EndlessBot` (a lane-picking centreline follower) on the endless road.
 
 ## Layout
 
