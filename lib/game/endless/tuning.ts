@@ -24,9 +24,13 @@ export const ENDLESS_TUNING = {
   // --- obstacles ---
   clearLane: 4.4,
   /** Minimum gap between obstacle patterns per band. */
-  patternSpacing: [110, 95, 80, 65, 55],
-  /** Speed used for the reaction-distance floor per band. */
+  patternSpacing: [110, 95, 75, 60, 50],
+  /** Speed used for the reaction-distance floor per band: gap ≥ reactionTime·v + reactionBase. */
   expectedSpeed: [30, 36, 42, 46, 50],
+  reactionTime: 0.7,
+  reactionBase: 15,
+  /** At bands ≥ 3 every Nth pattern slot is left empty as a breather. */
+  restEvery: 4,
   /** No obstacles in the first metres of a run. */
   quietStart: 250,
   /** Below this band obstacles avoid corners tighter than `blindCurvature`. */
