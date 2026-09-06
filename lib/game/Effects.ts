@@ -1,7 +1,25 @@
 import * as THREE from 'three';
 import { PALETTE } from './palette';
-import type { ArcadeCar } from './ArcadeCar';
+import type { ImpactEvent } from './ArcadeCar';
 import type { CarVisual } from './CarMesh';
+import type { Surface } from './Road';
+
+/** The fields the effects driver reads from anything that looks like a car. */
+export interface CarFxState {
+  speed: number;
+  slip: number;
+  heading: number;
+  vx: number;
+  vz: number;
+  isDrifting: boolean;
+  driftCharge: number;
+  braking: boolean;
+  handbrake: boolean;
+  surface: Surface;
+  boostTime: number;
+  boostTier: number;
+  impacts: ImpactEvent[];
+}
 
 interface Particle {
   x: number; y: number; z: number;
@@ -190,7 +208,7 @@ export class CarEffects {
 
   constructor(private readonly particles: ParticleSystem, private readonly skids: SkidMarks, private readonly id: string) {}
 
-  public update(dt: number, car: ArcadeCar, visual: CarVisual): void {
+  public update(dt: number, car: CarFxState, visual: CarVisual): void {
     const speed = car.speed;
     const slip = car.slip;
     const heading = car.heading;

@@ -1,6 +1,27 @@
 import * as THREE from 'three';
 import { PALETTE } from './palette';
-import type { ArcadeCar } from './ArcadeCar';
+
+/** The fields the renderer reads from anything that looks like a car. */
+export interface CarPose {
+  x: number;
+  z: number;
+  heading: number;
+  prevX: number;
+  prevZ: number;
+  prevHeading: number;
+}
+
+export interface CarVisualState extends CarPose {
+  accelL: number;
+  accelF: number;
+  lateralSpeed: number;
+  forwardSpeed: number;
+  wheelSpin: number;
+  steer: number;
+  braking: boolean;
+  throttle: number;
+  handbrake: boolean;
+}
 
 const WHEEL_RADIUS = 0.36;
 
@@ -37,17 +58,27 @@ function box(w: number, h: number, d: number, mat: THREE.Material, x = 0, y = 0,
   return m;
 }
 
+export interface CarMeshOptions {
+  /** Headlight colour (default warm white). */
+  headlight?: number;
+  /** Racing stripe colour (default cream). */
+  stripe?: number;
+  /** Adds an emissive underglow strip in this colour. */
+  underglow?: number;
+}
+
 /** Low-poly hatchback. Forward is +Z in local space; wheels sit on y=0. */
-export function buildCarMesh(color: number): CarVisual {
+export function buildCarMesh(color: number, opts: CarMeshOptions = {}): CarVisual {
   const group = new THREE.Group();
   const body = new THREE.Group();
   group.add(body);
 
+  const headColor = opts.headlight ?? PALETTE.headlight;
   const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.15 });
   const dark = new THREE.MeshStandardMaterial({ color: PALETTE.tyre, roughness: 0.9 });
   const glass = new THREE.MeshStandardMaterial({ color: PALETTE.glass, roughness: 0.2, metalness: 0.4 });
   const chrome = new THREE.MeshStandardMaterial({ color: 0xd8d2e0, roughness: 0.35, metalness: 0.6 });
-  const headMat = new THREE.MeshStandardMaterial({ color: PALETTE.headlight, emissive: PALETTE.headlight, emissiveIntensity: 1.2 });
+  const headMat = new THREE.MeshStandardMaterial({ color: headColor, emissive: headColor, emissiveIntensity: 1.2 });
   const brakeMat = new THREE.MeshStandardMaterial({ color: 0x5a1010, emissive: PALETTE.brakeLight, emissiveIntensity: 0.15 });
 
   const ride = WHEEL_RADIUS; // body base height
@@ -83,7 +114,15 @@ export function buildCarMesh(color: number): CarVisual {
   exhaust.position.set(0.55, ride + 0.12, -2.1);
   body.add(exhaust);
   // racing stripe
-  body.add(box(0.36, 0.02, 3.9, new THREE.MeshStandardMaterial({ color: 0xfff4e6, roughness: 0.6 }), 0, ride + 0.51, 0, false));
+  const stripeMat = new THREE.MeshStandardMaterial({ color: opts.stripe ?? 0xfff4e6, roughness: 0.6 });
+  body.add(box(0.36, 0.02, 3.9, stripeMat, 0, ride + 0.51, 0, false));
+  const extraMats: THREE.Material[] = [stripeMat];
+  if (opts.underglow !== undefined) {
+    const glow = new THREE.MeshBasicMaterial({ color: opts.underglow, transparent: true, opacity: 0.55, toneMapped: false, depthWrite: false });
+    const strip = box(2.3, 0.02, 4.4, glow, 0, 0.06, 0, false);
+    body.add(strip);
+    extraMats.push(glow);
+  }
 
   const wheels: THREE.Mesh[] = [];
   const frontPivots: THREE.Group[] = [];
@@ -108,7 +147,7 @@ export function buildCarMesh(color: number): CarVisual {
     if (p.front) frontPivots.push(pivot);
   }
 
-  const mats = [paint, dark, glass, chrome, headMat, brakeMat];
+  const mats = [paint, dark, glass, chrome, headMat, brakeMat, ...extraMats];
   return {
     group, body, wheels, frontPivots, brakeMat,
     exhaustLocal: new THREE.Vector3(0.55, ride + 0.12, -2.25),
@@ -124,7 +163,7 @@ export function buildCarMesh(color: number): CarVisual {
 }
 
 /** Interpolated pose between the previous and current physics step. */
-export function interpolatePose(car: ArcadeCar, alpha: number): { x: number; z: number; heading: number } {
+export function interpolatePose(car: CarPose, alpha: number): { x: number; z: number; heading: number } {
   let dh = car.heading - car.prevHeading;
   while (dh > Math.PI) dh -= Math.PI * 2;
   while (dh < -Math.PI) dh += Math.PI * 2;
@@ -136,7 +175,7 @@ export function interpolatePose(car: ArcadeCar, alpha: number): { x: number; z: 
 }
 
 /** Apply pose + visual body dynamics (roll, pitch, steering, wheel spin, brake lights). */
-export function updateCarVisual(v: CarVisual, car: ArcadeCar, alpha: number, dt: number): void {
+export function updateCarVisual(v: CarVisual, car: CarVisualState, alpha: number, dt: number): void {
   const pose = interpolatePose(car, alpha);
   v.group.position.set(pose.x, 0, pose.z);
   v.group.rotation.y = pose.heading;
