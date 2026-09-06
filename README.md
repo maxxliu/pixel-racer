@@ -22,7 +22,7 @@ Longer drifts charge bigger boosts (blue → orange → purple sparks). Press th
 
 An endless, procedurally streamed road with a rival on your tail. Cones, blocks, oil and boost pads arrive in patterns that always leave a lane; the road tightens and the patterns thicken the further you go. Score is metres travelled times a multiplier that grows every three clean patterns and every close call (passing an obstacle within a metre at speed), and resets the moment you touch anything, walls included. Every touch also costs speed and makes the rival surge.
 
-The rival sits a car length or two behind you and is never more than 100 m back, however fast you go. A cone clip costs you around seven metres of breathing room, a block or a hard wall hit around seventeen, and lost ground comes back slowly; the comfort gap shrinks as the run goes on until a single block is fatal. It pulls alongside when it gets close, and the run ends the moment it passes you. Watch the rear-view mirror at the top of the screen and the rival gauge (bottom left, gap in metres). `Space` starts the next run.
+The rival lives on your bumper, a car length or two back, and is never more than 60 m behind however fast you go. A cone clip costs you around six metres of breathing room and takes a long time to win back; a second clip before then, or any block or hard wall hit, and it is past you. The comfort gap shrinks as the run goes on until any touch is fatal. It pulls alongside when it gets close, and the run ends the moment it passes you. Watch the rear-view mirror at the top of the screen and the rival gauge (bottom left, gap in metres). `Space` starts the next run.
 
 ## Develop
 

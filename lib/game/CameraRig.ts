@@ -16,6 +16,8 @@ export class CameraRig {
   private roll = 0;
   private introT = 0;
   private initialised = false;
+  private chaseExtraDist = 0;
+  private chaseExtraHeight = 0;
   private readonly tmpF = new THREE.Vector3();
   private readonly tmpR = new THREE.Vector3();
   private readonly tmpT = new THREE.Vector3();
@@ -29,6 +31,12 @@ export class CameraRig {
   public cycle(): CameraMode {
     this.mode = MODES[(MODES.indexOf(this.mode) + 1) % MODES.length];
     return this.mode;
+  }
+
+  /** Pull the chase view back and up (used by the endless mode so the rival's nose fits in frame). */
+  public setChaseBias(extraDist: number, extraHeight: number): void {
+    this.chaseExtraDist = extraDist;
+    this.chaseExtraHeight = extraHeight;
   }
 
   public addShake(amount: number): void {
@@ -63,7 +71,7 @@ export class CameraRig {
       case 'hood':
         dist = -1.2; height = 1.05; targetFov = 74 + speedN * 14; lookAhead = 0.5; break;
       default:
-        dist = 8.4 + speedN * 3.2; height = 3.2 + speedN * 1.1; targetFov = 62 + speedN * 15; lookAhead = 0.32;
+        dist = 8.4 + speedN * 3.2 + this.chaseExtraDist; height = 3.2 + speedN * 1.1 + this.chaseExtraHeight; targetFov = 62 + speedN * 15; lookAhead = 0.32;
     }
     if (boosting) targetFov += 8;
 
