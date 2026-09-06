@@ -58,6 +58,21 @@ export class HapticFeedback {
     this.vibrate(30);
   }
 
+  /** Threaded a gap by a whisker */
+  static nearMiss(): void {
+    this.vibrate([20, 30, 20]);
+  }
+
+  /** The rival is right behind you */
+  static closing(): void {
+    this.vibrate([40, 60, 40, 60, 40]);
+  }
+
+  /** Caught */
+  static caught(): void {
+    this.vibrate([200, 80, 300]);
+  }
+
   /** Stop any active vibration */
   static stop(): void {
     if (this.isSupported()) {

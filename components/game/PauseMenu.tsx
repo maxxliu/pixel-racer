@@ -11,16 +11,17 @@ interface PauseMenuProps {
   onRestart: () => void;
   onExit: () => void;
   isMobile?: boolean;
+  restartLabel?: string;
 }
 
-export default function PauseMenu({ onResume, onRestart, onExit, isMobile = false }: PauseMenuProps) {
+export default function PauseMenu({ onResume, onRestart, onExit, isMobile = false, restartLabel = 'Restart race' }: PauseMenuProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <>
       <Modal open={!settingsOpen} onClose={onResume} title="Paused" dim="light" width="max-w-sm">
         <div className="flex flex-col gap-3">
           <Button variant="primary" size="lg" onClick={onResume} autoFocus>Resume</Button>
-          <Button onClick={onRestart}>Restart race</Button>
+          <Button onClick={onRestart}>{restartLabel}</Button>
           <Button onClick={() => setSettingsOpen(true)}>Settings</Button>
           <Button variant="danger" onClick={onExit}>Quit to menu</Button>
         </div>

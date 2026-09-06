@@ -10,6 +10,7 @@ import type { TrackWaypoint } from '@/lib/game/types';
 import type { Point2D } from './TrackGeometryUtils';
 import { validateTrack } from './TrackValidator';
 import { assignTrackProperties, resamplePath, laplacianSmooth } from './PathProcessor';
+import { mulberry32 } from '@/lib/utils/rng';
 
 export type GenerationDifficulty = 'easy' | 'medium' | 'hard' | 'expert';
 
@@ -35,17 +36,6 @@ const PROFILES: Record<GenerationDifficulty, DifficultyProfile> = {
   hard:   { harmonics: 4, amplitude: 0.26, pinch: 0.4, spacing: 6 },
   expert: { harmonics: 5, amplitude: 0.3,  pinch: 0.55, spacing: 6 },
 };
-
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 function radialLoop(rand: () => number, profile: DifficultyProfile, worldSize: number, amplitudeScale: number): Point2D[] {
   const R = worldSize * 0.42;

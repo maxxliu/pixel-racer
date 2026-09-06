@@ -1,32 +1,10 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
 import type { TrackWaypoint, StartPosition, Vec2 } from './types';
 import { Segment, SegmentHash } from './Collision';
+import { KERB_WIDTH, KERB_CURVATURE, WALL_OFFSET, type Road, type SplineSample, type NearestResult, type Surface } from './Road';
 
-export interface SplineSample {
-  x: number;
-  z: number;
-  /** Unit tangent (direction of travel). */
-  tx: number;
-  tz: number;
-  /** Unit right-hand normal: right = (-tz, tx). Positive lateral = right of travel. */
-  nx: number;
-  nz: number;
-  /** Full road width (asphalt) at this sample. */
-  width: number;
-  /** Arc length from the start line. */
-  s: number;
-  /** Signed curvature, positive = turning left. */
-  curvature: number;
-}
-
-export interface NearestResult {
-  index: number;
-  s: number;
-  /** Signed lateral offset from centreline, positive = right of travel. */
-  lateral: number;
-  /** Distance to the centreline (abs lateral). */
-  distance: number;
-}
+export { KERB_WIDTH, KERB_CURVATURE, WALL_OFFSET } from './Road';
+export type { SplineSample, NearestResult, Surface } from './Road';
 
 export interface Gate {
   index: number;
@@ -46,11 +24,6 @@ export interface MinimapData {
   start: { x: number; z: number; tx: number; tz: number };
 }
 
-export type Surface = 'asphalt' | 'kerb' | 'grass';
-
-export const KERB_WIDTH = 1.2;
-export const WALL_OFFSET = 2.6; // from asphalt edge to wall face
-export const KERB_CURVATURE = 0.011; // radius < ~90m gets kerbs
 const SAMPLE_SPACING = 2;
 const GATE_COUNT = 7; // includes the start/finish gate at index 0
 const HASH_CELL = 10;
@@ -74,7 +47,7 @@ export function validateWaypoints(waypoints: TrackWaypoint[] | undefined | null)
   return null;
 }
 
-export class TrackSpline {
+export class TrackSpline implements Road {
   public readonly samples: SplineSample[] = [];
   public readonly length: number;
   /** Arc length between consecutive samples. */
@@ -90,6 +63,7 @@ export class TrackSpline {
   public readonly winding: 1 | -1;
   private readonly hash = new Map<string, number[]>();
   private readonly queryScratch: number[] = [];
+  private readonly seenScratch = new Set<number>();
 
   constructor(public readonly waypoints: TrackWaypoint[], startOverride?: StartPosition) {
     const err = validateWaypoints(waypoints);
@@ -303,6 +277,20 @@ export class TrackSpline {
 
   public halfWidthAt(index: number): number {
     return this.samples[index].width / 2;
+  }
+
+  /** Wall segments near a point (deduplicated). */
+  public queryWalls(x: number, z: number, radius: number, out: Segment[] = []): Segment[] {
+    out.length = 0;
+    const ids = this.wallHash.query(x, z, radius, this.queryScratch);
+    const seen = this.seenScratch;
+    seen.clear();
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(this.wallSegments[id]);
+    }
+    return out;
   }
 
   public sampleAt(s: number): SplineSample {

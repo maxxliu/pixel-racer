@@ -3,6 +3,7 @@
 import { memo, useEffect, useRef, useSyncExternalStore } from 'react';
 import type { GameStore, HudState, Notice } from '@/lib/game/GameStore';
 import type { MinimapData } from '@/lib/game/TrackSpline';
+import type { GameMode } from '@/lib/game/types';
 import { formatTime, formatDelta } from '@/lib/utils/format';
 import { hex } from '@/lib/game/palette';
 import { SpeedLines } from './SpeedLines';
@@ -11,11 +12,23 @@ interface HUDProps {
   store: GameStore;
   minimap: MinimapData | null;
   isMobile: boolean;
-  mode: 'time-trial' | 'race';
+  mode: GameMode;
   speedLines: boolean;
 }
 
 const MAX_KMH = 230;
+const GAUGE_RANGE = 60; // metres shown on the rival gauge
+
+function formatDistance(m: number): string {
+  if (m >= 1000) return `${(m / 1000).toFixed(2)} km`;
+  return `${Math.floor(m)} m`;
+}
+
+function dangerColor(d: number): string {
+  // lime → sun → coral
+  if (d < 0.5) return d < 0.25 ? '#c8ff3d' : '#ffd166';
+  return d < 0.75 ? '#ff8a5b' : '#ff5c4d';
+}
 
 function HUDInner({ store, minimap, isMobile, mode, speedLines }: HUDProps) {
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
@@ -29,6 +42,19 @@ function HUDInner({ store, minimap, isMobile, mode, speedLines }: HUDProps) {
   const meterWrapRef = useRef<HTMLDivElement>(null);
   const linesRef = useRef<HTMLDivElement>(null);
   const dotsRef = useRef<SVGGElement>(null);
+  // endless
+  const scoreRef = useRef<HTMLDivElement>(null);
+  const distRef = useRef<HTMLDivElement>(null);
+  const multRef = useRef<HTMLDivElement>(null);
+  const runTimeRef = useRef<HTMLDivElement>(null);
+  const bestScoreRef = useRef<HTMLDivElement>(null);
+  const rivalRef = useRef<HTMLDivElement>(null);
+  const gapRef = useRef<HTMLDivElement>(null);
+  const gaugeRef = useRef<HTMLDivElement>(null);
+  const dangerRef = useRef<HTMLDivElement>(null);
+  const shownScore = useRef(0);
+
+  const endless = mode === 'endless';
 
   // Hot values straight into the DOM at render rate.
   useEffect(() => {
@@ -66,6 +92,41 @@ function HUDInner({ store, minimap, isMobile, mode, speedLines }: HUDProps) {
           (children[i] as SVGGElement).setAttribute('transform', `translate(${d.x.toFixed(1)} ${d.z.toFixed(1)}) rotate(${(180 - (d.heading * 180) / Math.PI).toFixed(1)})`);
         }
       }
+      // endless
+      if (scoreRef.current) {
+        // count up toward the live score so big jumps read as a roll, not a cut
+        const target = Math.floor(s.score);
+        const cur = shownScore.current;
+        const next = target < cur ? target : cur + Math.max(1, Math.ceil((target - cur) * 0.2));
+        shownScore.current = Math.min(target, next);
+        scoreRef.current.textContent = shownScore.current.toLocaleString();
+      }
+      if (distRef.current) distRef.current.textContent = formatDistance(s.distance);
+      if (multRef.current) {
+        multRef.current.textContent = `×${s.multiplier}`;
+        const m = s.multiplier;
+        multRef.current.style.background = m >= 6 ? '#b38cff' : m >= 4 ? '#ff8a5b' : m >= 2 ? '#3fb6ff' : 'rgba(255,247,239,0.16)';
+        multRef.current.style.color = m >= 2 ? '#0f0a1e' : '#fff7ef';
+      }
+      if (runTimeRef.current) runTimeRef.current.textContent = formatTime(s.runTime * 1000, { precision: 2 });
+      if (bestScoreRef.current) bestScoreRef.current.textContent = s.bestScore > 0 ? Math.floor(s.bestScore).toLocaleString() : '—';
+      if (rivalRef.current && gapRef.current && gaugeRef.current) {
+        const gap = Math.max(0, s.gap);
+        const frac = 1 - Math.min(1, gap / GAUGE_RANGE);
+        rivalRef.current.style.left = `calc(${(frac * 100).toFixed(1)}% - 10px)`;
+        gapRef.current.textContent = `${gap.toFixed(0)} m`;
+        const c = dangerColor(s.danger);
+        gapRef.current.style.color = c;
+        rivalRef.current.style.background = c;
+        const pulse = s.danger > 0.6 ? 0.85 + Math.sin(performance.now() * 0.02) * 0.15 : 1;
+        gaugeRef.current.style.opacity = String(pulse);
+        gaugeRef.current.style.borderColor = s.danger > 0.6 ? c : 'rgba(255,247,239,0.12)';
+      }
+      if (dangerRef.current) {
+        const d = s.danger;
+        const beat = d > 0.6 ? (Math.sin(performance.now() * 0.012) + 1) * 0.5 * 0.35 : 0;
+        dangerRef.current.style.opacity = (d * d * 0.7 + beat).toFixed(2);
+      }
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
@@ -78,37 +139,62 @@ function HUDInner({ store, minimap, isMobile, mode, speedLines }: HUDProps) {
     <div className="hud" aria-hidden={snap.phase === 'finished'}>
       {speedLines && <SpeedLines innerRef={linesRef} />}
       <div className="vignette" />
+      {endless && <div ref={dangerRef} className="danger-vignette" />}
 
-      {/* top-left: lap & position */}
-      <div className={`absolute left-3 top-3 flex gap-2 ${isMobile ? 'scale-75 origin-top-left' : ''}`}>
-        <div className="glass px-4 py-2">
-          <div className="text-label uppercase text-muted">Lap</div>
-          <div className="text-3xl font-bold italic leading-none hud-num">
-            {snap.lap}<span className="text-base text-muted">/{snap.totalLaps}</span>
+      {/* top-left: lap & position, or score */}
+      {endless ? (
+        <div className={`absolute left-3 top-3 flex items-start gap-2 ${isMobile ? 'scale-75 origin-top-left' : ''}`}>
+          <div className="glass px-4 py-2">
+            <div className="text-label uppercase text-muted">Score</div>
+            <div className="flex items-baseline gap-2">
+              <div ref={scoreRef} className="text-3xl font-bold italic leading-none hud-num">0</div>
+              <div ref={multRef} className="rounded-md px-1.5 py-0.5 text-xs font-bold hud-num" style={{ background: 'rgba(255,247,239,0.16)' }}>×1</div>
+            </div>
+            <div ref={distRef} className="mt-1 text-sm text-cream/80 hud-num">0 m</div>
           </div>
         </div>
-        {showPos && (
+      ) : (
+        <div className={`absolute left-3 top-3 flex gap-2 ${isMobile ? 'scale-75 origin-top-left' : ''}`}>
           <div className="glass px-4 py-2">
-            <div className="text-label uppercase text-muted">Pos</div>
-            <div className={`text-3xl font-bold italic leading-none hud-num ${snap.position === 1 ? 'text-lime' : ''}`}>
-              {snap.position}<span className="text-base text-muted">/{snap.totalRacers}</span>
+            <div className="text-label uppercase text-muted">Lap</div>
+            <div className="text-3xl font-bold italic leading-none hud-num">
+              {snap.lap}<span className="text-base text-muted">/{snap.totalLaps}</span>
             </div>
           </div>
-        )}
-      </div>
-
-      {/* top-right: timing */}
-      <div className={`absolute right-3 top-3 glass px-4 py-2 text-right ${isMobile ? 'scale-75 origin-top-right' : ''}`}>
-        <div className="text-label uppercase text-muted">Lap time</div>
-        <div ref={timeRef} className="text-2xl font-bold italic leading-none hud-num">0:00.000</div>
-        <div className="mt-1 flex items-baseline justify-end gap-2 text-xs">
-          <span className="text-muted">BEST</span>
-          <span ref={bestRef} className="hud-num text-sun">--:--.---</span>
-          {snap.lastLap > 0 && delta !== 0 && (
-            <span className={`hud-num ${delta < 0 ? 'text-lime' : 'text-coral'}`}>{formatDelta(delta)}</span>
+          {showPos && (
+            <div className="glass px-4 py-2">
+              <div className="text-label uppercase text-muted">Pos</div>
+              <div className={`text-3xl font-bold italic leading-none hud-num ${snap.position === 1 ? 'text-lime' : ''}`}>
+                {snap.position}<span className="text-base text-muted">/{snap.totalRacers}</span>
+              </div>
+            </div>
           )}
         </div>
-      </div>
+      )}
+
+      {/* top-right: timing */}
+      {endless ? (
+        <div className={`absolute right-3 top-3 glass px-4 py-2 text-right ${isMobile ? 'scale-75 origin-top-right' : ''}`}>
+          <div className="text-label uppercase text-muted">Best</div>
+          <div ref={bestScoreRef} className="text-2xl font-bold italic leading-none hud-num text-sun">—</div>
+          <div className="mt-1 flex items-baseline justify-end gap-2 text-xs">
+            <span className="text-muted">TIME</span>
+            <span ref={runTimeRef} className="hud-num text-cream">0:00.00</span>
+          </div>
+        </div>
+      ) : (
+        <div className={`absolute right-3 top-3 glass px-4 py-2 text-right ${isMobile ? 'scale-75 origin-top-right' : ''}`}>
+          <div className="text-label uppercase text-muted">Lap time</div>
+          <div ref={timeRef} className="text-2xl font-bold italic leading-none hud-num">0:00.000</div>
+          <div className="mt-1 flex items-baseline justify-end gap-2 text-xs">
+            <span className="text-muted">BEST</span>
+            <span ref={bestRef} className="hud-num text-sun">--:--.---</span>
+            {snap.lastLap > 0 && delta !== 0 && (
+              <span className={`hud-num ${delta < 0 ? 'text-lime' : 'text-coral'}`}>{formatDelta(delta)}</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* bottom-right: speed */}
       <div className={`absolute bottom-3 right-3 flex items-end gap-3 ${isMobile ? 'bottom-2 left-[40%] right-auto -translate-x-1/2 scale-[0.7] origin-bottom' : ''}`}>
@@ -136,11 +222,25 @@ function HUDInner({ store, minimap, isMobile, mode, speedLines }: HUDProps) {
         </div>
       </div>
 
-      {/* bottom-left: minimap */}
-      {minimap && (
-        <div className={`absolute bottom-3 left-3 glass p-2 ${isMobile ? 'h-24 w-24 scale-90 origin-bottom-left' : 'h-40 w-40'}`}>
-          <Minimap data={minimap} dots={snap.dots} dotsRef={dotsRef} />
+      {/* bottom-left: minimap, or the rival gauge */}
+      {endless ? (
+        <div ref={gaugeRef} className={`absolute left-3 glass px-4 py-3 ${isMobile ? 'top-[92px] w-40 scale-90 origin-top-left' : 'bottom-3 w-64'}`} style={{ borderWidth: 1 }}>
+          <div className="flex items-baseline justify-between">
+            <div className="text-label uppercase text-muted">Rival</div>
+            <div ref={gapRef} className="text-lg font-bold italic leading-none hud-num text-lime">60 m</div>
+          </div>
+          <div className="relative mt-2 h-5">
+            <div className="absolute left-2 right-2 top-1/2 h-0.5 -translate-y-1/2 bg-cream/20" />
+            <div ref={rivalRef} className="absolute top-1/2 h-4 w-5 -translate-y-1/2 rounded-sm bg-lime shadow-[0_0_10px_rgba(255,92,77,0.6)]" style={{ left: '-10px' }} />
+            <div className="absolute right-0 top-1/2 h-4 w-5 -translate-y-1/2 rounded-sm bg-coral" />
+          </div>
         </div>
+      ) : (
+        minimap && (
+          <div className={`absolute bottom-3 left-3 glass p-2 ${isMobile ? 'h-24 w-24 scale-90 origin-bottom-left' : 'h-40 w-40'}`}>
+            <Minimap data={minimap} dots={snap.dots} dotsRef={dotsRef} />
+          </div>
+        )
       )}
 
       {/* centre notices */}
@@ -167,9 +267,10 @@ function HUDInner({ store, minimap, isMobile, mode, speedLines }: HUDProps) {
 
 function NoticeView({ notice }: { notice: Notice }) {
   const color = notice.kind === 'good' ? 'text-lime' : notice.kind === 'bad' ? 'text-coral' : notice.kind === 'big' ? 'text-sun' : 'text-cream';
+  const size = notice.kind === 'big' ? 'text-6xl' : 'text-4xl';
   return (
     <div className="anim-pop text-center">
-      <div className={`text-4xl font-bold italic uppercase leading-none drop-shadow-[0_4px_0_rgba(15,10,30,0.6)] ${color}`}>{notice.text}</div>
+      <div className={`${size} font-bold italic uppercase leading-none drop-shadow-[0_4px_0_rgba(15,10,30,0.6)] ${color}`}>{notice.text}</div>
       {notice.sub && <div className="mt-1 text-sm font-semibold uppercase tracking-wider text-cream/85">{notice.sub}</div>}
     </div>
   );
@@ -182,7 +283,7 @@ function Minimap({ data, dots, dotsRef }: { data: MinimapData; dots: HudState['d
   const cx = (bounds.minX + bounds.maxX) / 2, cz = (bounds.minZ + bounds.maxZ) / 2;
   const viewBox = `${cx - size / 2} ${cz - size / 2} ${size} ${size}`;
   const s = data.start;
-    const dotR = size / 42;
+  const dotR = size / 42;
   return (
     <svg viewBox={viewBox} className="h-full w-full" aria-hidden="true">
       <path d={data.outerPath} fill="#6f6788" stroke="#fff7ef" strokeWidth={size / 120} strokeOpacity="0.9" />

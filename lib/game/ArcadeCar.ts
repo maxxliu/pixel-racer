@@ -1,5 +1,5 @@
-import type { TrackSpline, Surface } from './TrackSpline';
-import { circleVsSegment, circleVsCircle } from './Collision';
+import type { Road, Surface } from './Road';
+import { circleVsSegment, sweptCircleVsSegment, circleVsCircle, type Segment } from './Collision';
 
 export interface CarInput {
   throttle: number; // -1..1
@@ -12,7 +12,9 @@ export interface ImpactEvent {
   magnitude: number; // normal speed at impact, m/s
   x: number;
   z: number;
-  other: 'wall' | 'car';
+  other: 'wall' | 'car' | 'obstacle';
+  /** Obstacle kind when `other` is 'obstacle'. */
+  kind?: string;
 }
 
 export const CAR_TUNING = {
@@ -43,6 +45,8 @@ export const CAR_TUNING = {
   restitution: 0.22,
   impactLoss: 0.35,
   carRadius: 1.35,
+  slickGrip: 0.35,      // grip multiplier on an oil slick
+  slickTraction: 0.5,   // throttle multiplier on an oil slick
 };
 
 let nextId = 1;
@@ -69,6 +73,8 @@ export class ArcadeCar {
   public boostTier = 0;
   public stuck = false;
   public ghostTime = 0;
+  /** Seconds of reduced grip left (oil slick). */
+  public slickTime = 0;
   /** Nearest spline sample index (hint for the next query). */
   public splineIndex = 0;
   public splineS = 0;
@@ -88,8 +94,9 @@ export class ArcadeCar {
   private time = 0;
   private lastVF = 0;
   private lastVL = 0;
+  private readonly wallScratch: Segment[] = [];
 
-  constructor(private readonly spline: TrackSpline) {}
+  constructor(private readonly spline: Road) {}
 
   public get speed(): number {
     return Math.hypot(this.vx, this.vz);
@@ -124,6 +131,7 @@ export class ArcadeCar {
     this.boostTier = 0;
     this.stuck = false;
     this.stuckTimer = 0;
+    this.slickTime = 0;
     this.impacts.length = 0;
     const n = this.spline.nearest(x, z);
     this.splineIndex = n.index;
@@ -143,6 +151,8 @@ export class ArcadeCar {
     this.prevHeading = this.heading;
     this.impacts.length = 0;
     if (this.ghostTime > 0) this.ghostTime -= dt;
+    if (this.slickTime > 0) this.slickTime = Math.max(0, this.slickTime - dt);
+    const slick = this.slickTime > 0;
 
     if (frozen) {
       input = { throttle: 0, steer: 0, brake: true, handbrake: false };
@@ -179,7 +189,7 @@ export class ArcadeCar {
     if (this.throttle > 0) {
       const ratio = Math.max(0, vf) / maxSpeed;
       const curve = Math.max(0, 1 - Math.pow(Math.min(1, ratio), 2.2));
-      accel += T.maxAccel * this.throttle * curve * (boosting ? T.boostAccelFactor : 1);
+      accel += T.maxAccel * this.throttle * curve * (boosting ? T.boostAccelFactor : 1) * (slick ? T.slickTraction : 1);
       if (vf < 0) accel += T.brakeDecel; // braking out of reverse
     } else if (this.throttle < 0) {
       if (vf > 1) accel -= T.brakeDecel * -this.throttle;
@@ -242,6 +252,7 @@ export class ArcadeCar {
     if (this.surface === 'kerb') grip = T.gripKerb;
     if (this.surface === 'grass') grip = T.gripGrass;
     if (this.isDrifting) grip = Math.min(grip, T.gripDrift);
+    if (slick) grip *= T.slickGrip;
     // Yaw induces lateral velocity: the velocity vector stays put while the nose turns.
     const nfx = Math.sin(this.heading), nfz = Math.cos(this.heading);
     const nrx = -nfz, nrz = nfx;
@@ -329,19 +340,17 @@ export class ArcadeCar {
     const T = CAR_TUNING;
     const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
     const probes = [
-      { x: this.x + fx * T.axleOffset, z: this.z + fz * T.axleOffset },
-      { x: this.x - fx * T.axleOffset, z: this.z - fz * T.axleOffset },
+      { x: this.x + fx * T.axleOffset, z: this.z + fz * T.axleOffset, px: this.prevX + fx * T.axleOffset, pz: this.prevZ + fz * T.axleOffset },
+      { x: this.x - fx * T.axleOffset, z: this.z - fz * T.axleOffset, px: this.prevX - fx * T.axleOffset, pz: this.prevZ - fz * T.axleOffset },
     ];
-    const ids = this.spline.wallHash.query(this.x, this.z, T.bodyRadius + T.axleOffset + 1);
+    const moved = Math.hypot(this.x - this.prevX, this.z - this.prevZ);
+    const segs = this.spline.queryWalls(this.x, this.z, T.bodyRadius + T.axleOffset + 1 + moved, this.wallScratch);
     let maxImpact = 0;
     let ix = 0, iz = 0;
-    const seen = new Set<number>();
-    for (const id of ids) {
-      if (seen.has(id)) continue;
-      seen.add(id);
-      const seg = this.spline.wallSegments[id];
+    for (const seg of segs) {
       for (const p of probes) {
-        const hit = circleVsSegment(p.x, p.z, T.bodyRadius, seg);
+        // a fast, steep hit can put the probe behind the wall in one step: sweep the path too
+        const hit = circleVsSegment(p.x, p.z, T.bodyRadius, seg) ?? sweptCircleVsSegment(p.px, p.pz, p.x, p.z, T.bodyRadius, seg);
         if (!hit) continue;
         this.x += hit.nx * hit.depth;
         this.z += hit.nz * hit.depth;
@@ -363,6 +372,64 @@ export class ArcadeCar {
       this.lastImpactTime = this.time;
       this.impacts.push({ magnitude: maxImpact, x: ix, z: iz, other: 'wall' });
     }
+  }
+
+  /**
+   * Collide the car body against a static circle (an obstacle). Returns the closing
+   * speed (0 when not touching). `loss` is the fraction of speed removed on a hit.
+   * Soft obstacles (cones) only bleed speed; solid ones (blocks) also deflect the car
+   * so it glances off instead of stopping dead.
+   */
+  public collideCircle(cx: number, cz: number, radius: number, loss: number, kind: string, solid: boolean): number {
+    const T = CAR_TUNING;
+    const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
+    const rx = -fz, rz = fx;
+    let closing = 0;
+    let nx = 0, nz = 0;
+    let touched = false;
+    for (const off of [T.axleOffset, -T.axleOffset]) {
+      const px = this.x + fx * off, pz = this.z + fz * off;
+      const hit = circleVsCircle(cx, cz, radius, px, pz, T.bodyRadius);
+      if (!hit) continue;
+      touched = true;
+      if (solid) {
+        // hit normal points from the obstacle to the probe: keep the car outside it
+        this.x += hit.nx * hit.depth;
+        this.z += hit.nz * hit.depth;
+      }
+      const vn = this.vx * hit.nx + this.vz * hit.nz;
+      if (-vn > closing) { closing = -vn; nx = hit.nx; nz = hit.nz; }
+    }
+    if (!touched) return 0;
+    const fresh = this.time - this.lastImpactTime > 0.3;
+    if (closing > 0.5 && fresh) {
+      this.lastImpactTime = this.time;
+      const speed = Math.hypot(this.vx, this.vz);
+      const kept = speed * (1 - loss);
+      if (solid && speed > 0.1) {
+        // glance off: steer the velocity away from the obstacle, never straight back into it
+        let side = nx * rx + nz * rz;
+        if (Math.abs(side) < 0.25) side = side >= 0 ? 1 : -1;
+        const dx = nx + rx * Math.sign(side) * 0.8;
+        const dz = nz + rz * Math.sign(side) * 0.8;
+        const dl = Math.hypot(dx, dz) || 1;
+        let ux = this.vx / speed + (dx / dl) * 1.1;
+        let uz = this.vz / speed + (dz / dl) * 1.1;
+        const ul = Math.hypot(ux, uz) || 1;
+        ux /= ul; uz /= ul;
+        this.vx = ux * kept;
+        this.vz = uz * kept;
+      } else {
+        this.vx *= 1 - loss;
+        this.vz *= 1 - loss;
+      }
+      this.impacts.push({ magnitude: closing, x: cx, z: cz, other: 'obstacle', kind });
+    } else if (solid && closing > 0.5) {
+      // still leaning on it after the hit: bleed the component pushing into it
+      this.vx += nx * closing;
+      this.vz += nz * closing;
+    }
+    return closing;
   }
 
   /** Symmetric car-vs-car response. Call once per pair per step. */
